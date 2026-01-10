@@ -2,65 +2,59 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 
-// Helper para aguardar tempo (backoff)
+// Função para esperar um tempo (backoff)
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
-  let apiKey = process.env.API_KEY;
+  const apiKey = process.env.API_KEY;
   
   if (!apiKey) {
-    console.error("GeminiService: API Key está undefined ou vazia.");
-  } else {
-    apiKey = apiKey.trim();
+    throw new Error("A chave da API (API_KEY) não está configurada.");
   }
   
-  if (!apiKey) {
-    throw new Error("API Key not configured. A variável de ambiente API_KEY não foi encontrada.");
-  }
-
   const ai = new GoogleGenAI({ apiKey });
 
-  // Construção de query para contexto
   const hasLocation = !!(request.city || request.state);
+  const locationStr = hasLocation ? `${request.city ? request.city + '-' : ''}${request.state || ''}` : 'Brasil';
 
+  // Prompt focado exclusivamente em extração de dados reais
   const prompt = `
-    Você é um COMPRADOR TÉCNICO AUTOMOTIVO SÊNIOR.
+    ATUE COMO UM ESPECIALISTA EM COTAÇÃO DE PEÇAS AUTOMOTIVAS.
     
-    DADOS DO PEDIDO:
-    Veículo: ${request.make} ${request.model} ${request.year} (${request.vehicleType})
-    Peça: "${request.partName}"
-    Localização Preferencial: ${hasLocation ? (request.city ? request.city + ' - ' : '') + (request.state || '') : 'Brasil (Todo o território)'}
+    CONTEXTO:
+    Preciso encontrar fornecedores online com PREÇO e ESTOQUE para a seguinte peça:
+    - Veículo: ${request.make} ${request.model} ${request.year} (${request.vehicleType})
+    - Peça: "${request.partName}"
+    - Região de Busca: ${locationStr}
 
-    OBJETIVO CRÍTICO:
-    Localizar a peça EXATA compatível com este veículo específico em lojas online, retornando o LINK DIRETO para a página de compra do produto.
+    REQUISITOS OBRIGATÓRIOS:
+    1. Utilize a Google Search para encontrar ofertas REAIS e ATUAIS.
+    2. Busque em sites confiáveis como: Mercado Livre, Loja do Mecânico, Connect Parts, PneuStore, Hipervarejo, Autoglass, Amazon Brasil.
+    3. EXTRAIA O PREÇO REAL. Se o preço estiver parcelado (ex: 10x 30,00), calcule o total (300,00).
+    4. Se não encontrar o preço exato em um site específico, ignore esse site e busque outro. NÃO INVENTE PREÇOS.
+    5. Retorne apenas produtos que pareçam ser compatíveis com o veículo informado.
 
-    REGRAS DE OURO (COMPATIBILIDADE 100%):
-    1. RIGOR TOTAL NO ANO E MODELO: A peça DEVE servir no ${request.model} ano ${request.year}. Verifique a faixa de anos da peça (ex: se a peça é 2012-2016 e o carro é 2018, NÃO SERVE).
-    2. LINK DIRETO (DEEP LINK): O campo 'link' DEVE ser a URL DIRETA da página do produto (onde há o botão "Comprar").
-    3. PROIBIDO LINKS DE LISTA: Não retorne links de resultados de busca (ex: site.com/busca?q=...) a menos que seja absolutamente impossível encontrar o item específico. O usuário quer o produto final.
-    
-    DIRETRIZES DE PRIORIDADE DE LOJAS E LOCALIZAÇÃO:
-    1. ${hasLocation ? `PRIORIDADE REGIONAL: Tente encontrar fornecedores que atendam ou estejam localizados em ${request.state || request.city}.` : ''}
-    2. PRIORIDADE MÁXIMA (Especializadas): Hipervarejo, Connect Parts, Loja do Mecânico, PneuStore, Autoglass, Jocar, AutoZ, MercadoCar, Koga Koga.
-    3. MARKETPLACES: Mercado Livre, Amazon, Shopee (verifique se são vendedores bem avaliados).
-    4. Se houver opções locais (na região de ${request.state || request.city}), destaque isso na descrição. Caso contrário, liste grandes e-commerces que entregam em todo o Brasil.
-
-    INSTRUÇÕES DE PESQUISA:
-    - Utilize a ferramenta de busca para encontrar URLs reais de produtos (PDP - Product Detail Pages).
-    - Priorize peças de marcas conhecidas (Bosch, Cofap, Nakata, Monroe, Moura, etc.) sobre marcas genéricas.
+    FORMATO DE RESPOSTA (JSON):
+    Retorne um objeto JSON contendo:
+    - quotes: Array com as 4 melhores opções encontradas.
+    - summary: Um resumo técnico de 1 frase sobre a disponibilidade e média de preços.
   `;
 
-  // Configuração de Retry
+  // Configuração de Retry (Persistência)
+  // Tenta até 3 vezes. Se falhar na primeira (erro 429), espera e tenta de novo.
   const MAX_RETRIES = 3;
   let attempt = 0;
+  let lastError: any = null;
 
   while (attempt < MAX_RETRIES) {
     try {
+      console.log(`Tentativa de cotação ${attempt + 1} de ${MAX_RETRIES}...`);
+
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.0-flash", // Modelo estável e rápido
         contents: prompt,
         config: {
-          tools: [{ googleSearch: {} }],
+          tools: [{ googleSearch: {} }], // Ferramenta de busca ativada
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -70,78 +64,76 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    vendorName: { type: Type.STRING, description: "Nome da Loja" },
-                    productName: { type: Type.STRING, description: "Título Completo do Produto (Inclua marca e aplicação ex: 'Amortecedor Nakata para Onix 2020')" },
-                    price: { type: Type.NUMBER, description: "Preço numérico do produto" },
-                    currency: { type: Type.STRING, description: "Moeda (ex: BRL)" },
-                    description: { type: Type.STRING, description: "Breve descrição técnica e confirmação de compatibilidade (ex: 'Lado direito, ano 2019 a 2023')" },
-                    link: { type: Type.STRING, description: "URL direta do produto" }
+                    vendorName: { type: Type.STRING, description: "Nome da loja (ex: Mercado Livre)" },
+                    productName: { type: Type.STRING, description: "Título do produto no anúncio" },
+                    price: { type: Type.NUMBER, description: "Preço total à vista (ex: 150.00)" },
+                    currency: { type: Type.STRING, description: "Sempre BRL" },
+                    description: { type: Type.STRING, description: "Breve descrição ou condição" },
+                    link: { type: Type.STRING, description: "URL direta para o produto" }
                   },
                   required: ["vendorName", "productName", "price", "currency", "link"]
                 }
               },
-              summary: { type: Type.STRING, description: "Resumo executivo de 1 parágrafo explicando as opções encontradas, variação de preços e se houve sucesso em encontrar opções na região solicitada." }
+              summary: { type: Type.STRING }
             },
             required: ["quotes", "summary"]
           }
         }
       });
 
+      // Se chegamos aqui, a requisição funcionou. Vamos processar.
       let text = response.text || "{}";
-      text = text.replace(/```json\n?|```/g, "").trim();
+      text = text.replace(/```json\n?|```/g, "").trim(); // Limpeza de segurança
 
-      let parsedData: any = {};
-      try {
-          parsedData = JSON.parse(text);
-      } catch (e) {
-          console.error("JSON Parse Error. Raw text:", text);
-          parsedData = { quotes: [], summary: "Não foi possível estruturar os dados da busca. Tente novamente." };
-      }
-
+      const parsedData = JSON.parse(text);
       const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
       const quotes = (parsedData.quotes || []).map((q: any) => ({
-          vendorName: q.vendorName || "Loja Desconhecida",
+          vendorName: q.vendorName || "Fornecedor",
           productName: q.productName || request.partName,
-          price: typeof q.price === 'number' ? q.price : parseFloat(q.price) || 0,
-          currency: q.currency || "BRL",
+          price: typeof q.price === 'number' ? q.price : 0,
+          currency: "BRL",
           description: q.description || "",
           link: q.link || ""
       }));
 
+      // Validação: Se a IA retornou array vazio, consideramos falha e tentamos de novo (se tiver tentativas)
+      if (quotes.length === 0 && attempt < MAX_RETRIES - 1) {
+          throw new Error("IA retornou lista vazia, tentando novamente...");
+      }
+
       return {
         quotes: quotes,
-        summary: parsedData.summary || "Busca finalizada.",
+        summary: parsedData.summary || "Cotação realizada com sucesso.",
         groundingSources: groundingChunks as GroundingChunk[]
       };
 
     } catch (error: any) {
+      lastError = error;
       const errorMessage = error.message || "";
-      const isQuotaError = errorMessage.includes("429") || errorMessage.includes("Quota") || errorMessage.includes("ResourceExhausted");
-
-      // Se for erro de cota e ainda tivermos tentativas, aguarda e tenta de novo
-      if (isQuotaError && attempt < MAX_RETRIES - 1) {
+      
+      // Verifica se é erro de tráfego (429) ou erro de servidor (503)
+      const isTrafficError = errorMessage.includes("429") || errorMessage.includes("503") || errorMessage.includes("Quota");
+      
+      if (isTrafficError || errorMessage.includes("lista vazia")) {
         attempt++;
-        // Backoff: 2s, 4s...
-        const delayMs = 2000 * Math.pow(2, attempt - 1);
-        console.warn(`Cota excedida. Tentando novamente em ${delayMs/1000}s (Tentativa ${attempt}/${MAX_RETRIES - 1})`);
-        await wait(delayMs);
-        continue;
+        if (attempt < MAX_RETRIES) {
+          // Backoff Exponencial: Espera 2s, depois 4s, depois 8s...
+          const delay = 2000 * Math.pow(2, attempt - 1);
+          console.warn(`Erro de tráfego (${errorMessage}). Aguardando ${delay}ms para tentar novamente...`);
+          await wait(delay);
+          continue; // Volta para o início do while
+        }
+      } else {
+        // Se for outro erro (ex: chave inválida), falha imediatamente
+        throw error;
       }
-
-      console.error("Gemini API Error Full:", error);
-      
-      if (errorMessage.includes("API Key") || errorMessage.includes("403")) {
-          throw new Error("Erro de Autenticação: Verifique se sua API KEY é válida e está configurada corretamente na Vercel.");
-      }
-
-      if (isQuotaError) {
-           throw new Error("Muitas requisições simultâneas. O serviço gratuito do Google está congestionado. Aguarde 1 minuto e tente novamente.");
-      }
-      
-      throw new Error(`Erro na busca: ${errorMessage}`);
     }
+    
+    attempt++;
   }
-  
-  throw new Error("Falha ao conectar com o serviço após várias tentativas.");
+
+  // Se saiu do loop, falhou todas as tentativas
+  console.error("Falha definitiva após retries:", lastError);
+  throw new Error("O sistema de cotação está momentaneamente sobrecarregado com muitos pedidos. Por favor, aguarde 10 segundos e tente novamente para obter preços reais.");
 };
