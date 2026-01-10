@@ -6,11 +6,11 @@ import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // LISTA DE MODELOS PARA ROTAÇÃO (BALANCEAMENTO DE CARGA)
-// Se um estiver com fila (429), o sistema pula para o próximo automaticamente.
+// Removido o modelo 'pro-exp' que estava causando 404.
+// Alternamos entre a versão estável e a experimental do Flash.
 const AVAILABLE_MODELS = [
   "gemini-2.0-flash",           // Padrão: Rápido e Estável
-  "gemini-2.0-flash-exp",       // Experimental: Fila separada, geralmente livre
-  "gemini-2.0-pro-exp-02-05"    // Pro: Mais inteligente, fila separada
+  "gemini-2.0-flash-exp",       // Experimental: Fila separada
 ];
 
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
@@ -50,7 +50,7 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     - summary: Um resumo técnico de 1 frase sobre a disponibilidade da peça no mercado.
   `;
 
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = 4; // Aumentado um pouco para garantir rotação completa se necessário
   let attempt = 0;
   let lastError: any = null;
 
@@ -108,7 +108,7 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
           link: q.link || ""
       }));
 
-      // Se a lista vier vazia, força o erro para tentar o próximo modelo (pode ser que o modelo atual esteja "burro" hoje)
+      // Se a lista vier vazia, força o erro para tentar o próximo modelo
       if (quotes.length === 0 && attempt < MAX_RETRIES - 1) {
           throw new Error("Lista vazia retornada pelo modelo.");
       }
@@ -125,7 +125,15 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
       
       console.warn(`Erro no modelo ${currentModel}: ${errorMessage}`);
 
-      // Erros que justificam tentar outro modelo (Fila, Cota, Erro de Servidor, Timeout)
+      // TRATAMENTO DE ERRO 404 (Modelo não encontrado)
+      // Se o modelo não existe, pulamos imediatamente para o próximo sem esperar (backoff = 0)
+      if (errorMessage.includes("404") || errorMessage.includes("NOT_FOUND")) {
+          console.warn(`Modelo ${currentModel} indisponível. Pulando...`);
+          attempt++;
+          continue; 
+      }
+
+      // Erros que justificam tentar outro modelo (Fila, Cota, Erro de Servidor, Timeout, Lista Vazia)
       const isRetryable = errorMessage.includes("429") || 
                           errorMessage.includes("503") || 
                           errorMessage.includes("Quota") || 
@@ -135,12 +143,13 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
       if (isRetryable) {
         attempt++;
         if (attempt < MAX_RETRIES) {
-          // Espera mínima para dar tempo de trocar o "canal"
-          await wait(1500);
+          // Espera progressiva (backoff) apenas para erros de sobrecarga
+          // 1.5s, 3s, 4.5s...
+          await wait(1500 * attempt);
           continue; 
         }
       } else {
-        // Erros fatais (ex: chave inválida) param imediatamente
+        // Erros fatais (ex: chave inválida, erro de sintaxe grave) param imediatamente
         throw error;
       }
     }
