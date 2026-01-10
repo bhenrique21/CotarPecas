@@ -3,13 +3,15 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
-  const apiKey = process.env.API_KEY;
+  let apiKey = process.env.API_KEY;
   
-  // Debug (seguro) para verificar no console do navegador se a chave foi injetada
+  // Debug (seguro)
   if (!apiKey) {
     console.error("GeminiService: API Key está undefined ou vazia.");
   } else {
-    console.log("GeminiService: API Key carregada com sucesso (" + apiKey.substring(0, 4) + "...)");
+    // Sanitização básica
+    apiKey = apiKey.trim();
+    console.log("GeminiService: API Key carregada (" + apiKey.substring(0, 4) + "...)");
   }
   
   if (!apiKey) {
@@ -80,14 +82,21 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
       }
     });
 
-    const text = response.text || "{}";
+    let text = response.text || "{}";
+    
+    // Limpeza robusta de Markdown (remove ```json e ```)
+    text = text.replace(/```json\n?|```/g, "").trim();
+
     let parsedData: any = {};
     
     try {
         parsedData = JSON.parse(text);
     } catch (e) {
-        console.error("JSON Parse Error", e);
-        parsedData = { quotes: [], summary: "Não foi possível estruturar os dados da busca." };
+        console.error("JSON Parse Error. Raw text:", text);
+        console.error("Parse Error Details:", e);
+        // Não lançar erro aqui para tentar recuperar via regex se necessário futuramente, 
+        // ou retornar vazio para não quebrar a UI
+        parsedData = { quotes: [], summary: "Não foi possível estruturar os dados da busca. Tente novamente." };
     }
 
     const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
@@ -108,12 +117,21 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
       groundingSources: groundingChunks as GroundingChunk[]
     };
 
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    // Propaga o erro se for de API Key para que o App.tsx trate corretamente
-    if (error instanceof Error && (error.message.includes("API Key") || error.message.includes("API_KEY"))) {
-        throw error;
+  } catch (error: any) {
+    console.error("Gemini API Error Full:", error);
+    
+    // Tratamento de erros específicos conhecidos
+    let errorMessage = error.message || "Erro desconhecido na API";
+
+    if (errorMessage.includes("API Key") || errorMessage.includes("403")) {
+        throw new Error("Erro de Autenticação: Verifique se sua API KEY é válida e está configurada corretamente na Vercel.");
     }
-    throw new Error("Falha ao conectar com o serviço de cotação. Verifique sua conexão ou tente novamente.");
+
+    if (errorMessage.includes("429")) {
+         throw new Error("Limite de requisições excedido (Quota Exceeded). Tente novamente em alguns instantes.");
+    }
+    
+    // Repassa a mensagem original para facilitar debug na UI
+    throw new Error(`Erro na busca: ${errorMessage}`);
   }
 };
