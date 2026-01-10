@@ -1,8 +1,15 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  
+  if (!apiKey) {
+    throw new Error("API Key not configured. Verifique as variáveis de ambiente.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
 
   // Construção de query para contexto (não usado diretamente na API nova, mas útil para debug se necessário)
   const hasLocation = !!(request.city || request.state);
@@ -96,6 +103,10 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
 
   } catch (error) {
     console.error("Gemini API Error:", error);
+    // Propaga o erro se for de API Key para que o App.tsx trate corretamente
+    if (error instanceof Error && (error.message.includes("API Key") || error.message.includes("API_KEY"))) {
+        throw error;
+    }
     throw new Error("Falha ao conectar com o serviço de cotação. Verifique sua conexão ou tente novamente.");
   }
 };
