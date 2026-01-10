@@ -2,12 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key not found in environment variables.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // Construção de query para contexto (não usado diretamente na API nova, mas útil para debug se necessário)
   // O prompt abaixo já instrui o modelo a usar a ferramenta de busca com esses parâmetros.
