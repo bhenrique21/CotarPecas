@@ -8,11 +8,10 @@ const genAI = process.env.API_KEY
   : null;
 
 /**
- * Limpa a string JSON retornada pela IA (remove markdown ```json ... ```)
+ * Limpa a string JSON retornada pela IA
  */
 const cleanAndParseJSON = (text: string): any => {
   try {
-    // Remove marcadores de código markdown se existirem
     const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
     return JSON.parse(cleaned);
   } catch (e) {
@@ -22,54 +21,40 @@ const cleanAndParseJSON = (text: string): any => {
 };
 
 /**
- * GERA LINKS DE BACKUP (FALLBACK) - Focado em Lojas Especializadas
+ * GERA LINKS DE BACKUP (Estilo Buscapé)
  */
 const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
   const cleanPart = request.partName.trim();
   const fullTerm = `${cleanPart} ${request.make} ${request.model} ${request.year}`;
   const encodedTerm = encodeURIComponent(fullTerm);
-  const encodedPart = encodeURIComponent(cleanPart);
 
   return [
     {
-      vendorName: "Loja do Mecânico",
-      productName: `Busca: ${cleanPart}`,
+      vendorName: "Mercado Livre",
+      productName: `Ofertas: ${cleanPart}`,
       price: 0, 
       currency: "BRL",
-      description: "Maior loja de ferramentas e peças do Brasil.",
-      link: `https://www.lojadomecanico.com.br/busca?q=${encodedTerm}`
+      description: "Envio rápido e compra garantida.",
+      link: `https://lista.mercadolivre.com.br/pecas/${request.partName.replace(/\s+/g, '-')}-${request.make}-${request.model}-${request.year}_OrderId_PRICE_ASC`,
+      image: "https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/5.21.22/mercadolibre/logo__large_plus.png"
     },
     {
-      vendorName: "Hipervarejo",
-      productName: `Peças para ${request.model}`,
+      vendorName: "Magalu",
+      productName: `Busca Magazine Luiza`,
       price: 0,
       currency: "BRL",
-      description: "Especialista em peças automotivas.",
-      link: `https://www.hipervarejo.com.br/busca?q=${encodedTerm}`
+      description: "Retire na loja ou receba em casa.",
+      link: `https://www.magazineluiza.com.br/busca/${encodedTerm}/`,
+      image: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Magalu_Logo.png/800px-Magalu_Logo.png"
     },
     {
-      vendorName: "Jocar",
-      productName: `Ofertas Jocar`,
+      vendorName: "Amazon",
+      productName: `Amazon Peças`,
       price: 0,
       currency: "BRL",
-      description: "Autopeças e acessórios online.",
-      link: `https://www.jocar.com.br/busca/?q=${encodedTerm}`
-    },
-    {
-      vendorName: "PneuStore",
-      productName: `PneuStore Busca`,
-      price: 0,
-      currency: "BRL",
-      description: "Se for pneu ou item de roda.",
-      link: `https://www.pneustore.com.br/busca?q=${encodedTerm}`
-    },
-    {
-      vendorName: "Canal da Peça",
-      productName: `Catálogo Canal da Peça`,
-      price: 0,
-      currency: "BRL",
-      description: "Marketplace especializado em autopeças.",
-      link: `https://www.canaldapeca.com.br/busca?q=${encodedTerm}`
+      description: "Frete grátis para assinantes Prime.",
+      link: `https://www.amazon.com.br/s?k=${encodedTerm}&i=automotive`,
+      image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a9/Amazon_logo.svg/1024px-Amazon_logo.svg.png"
     }
   ];
 };
@@ -79,42 +64,41 @@ const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
  */
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
   if (!genAI) {
-    console.warn("API Key não encontrada. Usando modo offline/fallback.");
     return {
       quotes: generateFallbackLinks(request),
-      summary: "Modo offline: Buscas em lojas especializadas.",
+      summary: "Modo offline: Comparadores diretos.",
       groundingSources: []
     };
   }
 
-  // Prompt agressivo para ignorar marketplaces genéricos e focar em especialistas
+  // Prompt estilo "Buscapé"
   const prompt = `
-  Você é um comprador profissional de autopeças.
-  OBJETIVO: Encontrar o MENOR PREÇO REAL para a peça: "${request.partName}"
-  Veículo: "${request.make} ${request.model} ${request.year}"
+  Atue como um motor de comparação de preços (como Buscapé ou Zoom).
+  PRODUTO: "${request.partName}"
+  VEÍCULO: "${request.make} ${request.model} ${request.year}"
   
-  DIRETRIZES ESTRITAS:
-  1. PRIORIZE LOJAS ESPECIALIZADAS e CONFIÁVEIS: Loja do Mecânico, Hipervarejo, Jocar, PneuStore, Autoglass, Connect Parts, Canal da Peça, KD Pneus.
-  2. EVITE Marketplaces Genéricos (Mercado Livre, Shopee, Amazon, AliExpress) a menos que o preço seja drasticamente menor (50% menos) ou não haja estoque em outro lugar.
-  3. Você deve entrar nos sites (via search tool) e extrair o PREÇO À VISTA atual.
-  4. Ignore peças usadas/desmanche, busque peças novas.
+  TAREFA:
+  1. Pesquise no Google Shopping e grandes varejistas (Mercado Livre, Magalu, Casas Bahia, Americanas, Amazon, PneuStore, Loja do Mecânico).
+  2. Encontre 4 a 6 ofertas específicas deste produto.
+  3. Extraia o preço à vista, informações de parcelamento e, SE POSSÍVEL, um link direto para a IMAGEM do produto.
   
   SAÍDA OBRIGATÓRIA (JSON Array):
   [
     {
-      "vendorName": "Nome da Loja Especializada",
-      "productName": "Nome exato da peça no site",
-      "price": 120.50, (Número float puro)
-      "link": "URL direta do produto",
-      "description": "Marca da peça (ex: Bosch, Cofap)"
+      "vendorName": "Nome da Loja (ex: Magalu, Mercado Livre)",
+      "productName": "Título completo do anúncio",
+      "price": 120.50, (Preço à vista numérico)
+      "link": "URL da oferta",
+      "image": "URL da imagem principal do produto (tente encontrar uma jpg/png válida, se não achar deixe vazio)",
+      "installments": "ex: 10x de R$ 12,05 sem juros",
+      "description": "Frete grátis ou condição especial (opcional)"
     }
   ]
   `;
 
   try {
-    // Timeout de 15s para dar tempo de navegar em sites específicos
     const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error("Timeout IA")), 15000)
+      setTimeout(() => reject(new Error("Timeout IA")), 16000)
     );
 
     const aiPromise = genAI.models.generateContent({
@@ -131,44 +115,36 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     const jsonText = result.text;
     const aiQuotes = cleanAndParseJSON(jsonText);
     
-    // Validação
     const validQuotes = aiQuotes.map((q: any) => ({
-      vendorName: q.vendorName || "Loja Especializada",
+      vendorName: q.vendorName || "Loja Parceira",
       productName: q.productName || request.partName,
       price: (typeof q.price === 'number' && q.price > 0) ? q.price : 0,
       currency: "BRL",
-      description: q.description || "Peça Nova",
-      link: q.link
+      description: q.description || "Oferta Buscapé",
+      link: q.link,
+      image: q.image, // URL da imagem
+      installments: q.installments || "Consulte parcelamento"
     })).filter((q: QuoteResult) => q.link);
 
-    if (validQuotes.length === 0) throw new Error("Sem resultados exatos");
+    if (validQuotes.length === 0) throw new Error("Sem ofertas");
 
-    // Ordena por preço (menor para maior)
+    // Ordenar por preço
     validQuotes.sort((a: QuoteResult, b: QuoteResult) => {
         if (a.price > 0 && b.price > 0) return a.price - b.price;
         return 0;
     });
 
-    // Se tiver menos de 3 resultados, completa com busca direta em lojas especializadas
-    let finalQuotes = validQuotes;
-    if (finalQuotes.length < 3) {
-        const backups = generateFallbackLinks(request);
-        finalQuotes = [...finalQuotes, ...backups.slice(0, 3)];
-    }
-
-    const groundingMetadata = result.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-
     return {
-      quotes: finalQuotes,
-      summary: `Encontramos ofertas em lojas especializadas.`,
-      groundingSources: groundingMetadata
+      quotes: validQuotes,
+      summary: `Comparação de preços concluída.`,
+      groundingSources: result.candidates?.[0]?.groundingMetadata?.groundingChunks || []
     };
 
   } catch (error) {
     console.error("Erro na busca IA:", error);
     return {
       quotes: generateFallbackLinks(request),
-      summary: "Não foi possível verificar o preço exato. Acesse as lojas especializadas abaixo:",
+      summary: "Não foi possível carregar os preços em tempo real. Veja nos parceiros:",
       groundingSources: []
     };
   }
