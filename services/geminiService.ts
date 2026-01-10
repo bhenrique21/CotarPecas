@@ -1,11 +1,10 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // Construção de query para contexto (não usado diretamente na API nova, mas útil para debug se necessário)
-  // O prompt abaixo já instrui o modelo a usar a ferramenta de busca com esses parâmetros.
   const hasLocation = !!(request.city || request.state);
 
   const prompt = `
@@ -33,21 +32,6 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     INSTRUÇÕES DE PESQUISA:
     - Utilize a ferramenta de busca para encontrar URLs reais de produtos (PDP - Product Detail Pages).
     - Priorize peças de marcas conhecidas (Bosch, Cofap, Nakata, Monroe, Moura, etc.) sobre marcas genéricas.
-
-    FORMATO JSON OBRIGATÓRIO:
-    {
-      "quotes": [
-        {
-          "vendorName": "Nome da Loja",
-          "productName": "Título Completo do Produto (Inclua marca e aplicação ex: 'Amortecedor Nakata para Onix 2020')",
-          "price": 123.45,
-          "currency": "BRL",
-          "description": "Breve descrição técnica e confirmação de compatibilidade (ex: 'Lado direito, ano 2019 a 2023')",
-          "link": "https://loja.com.br/produto-123"
-        }
-      ],
-      "summary": "Resumo executivo de 1 parágrafo explicando as opções encontradas, variação de preços e se houve sucesso em encontrar opções na região solicitada."
-    }
   `;
 
   try {
@@ -56,7 +40,29 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            quotes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  vendorName: { type: Type.STRING, description: "Nome da Loja" },
+                  productName: { type: Type.STRING, description: "Título Completo do Produto (Inclua marca e aplicação ex: 'Amortecedor Nakata para Onix 2020')" },
+                  price: { type: Type.NUMBER, description: "Preço numérico do produto" },
+                  currency: { type: Type.STRING, description: "Moeda (ex: BRL)" },
+                  description: { type: Type.STRING, description: "Breve descrição técnica e confirmação de compatibilidade (ex: 'Lado direito, ano 2019 a 2023')" },
+                  link: { type: Type.STRING, description: "URL direta do produto" }
+                },
+                required: ["vendorName", "productName", "price", "currency", "link"]
+              }
+            },
+            summary: { type: Type.STRING, description: "Resumo executivo de 1 parágrafo explicando as opções encontradas, variação de preços e se houve sucesso em encontrar opções na região solicitada." }
+          },
+          required: ["quotes", "summary"]
+        }
       }
     });
 

@@ -1,8 +1,10 @@
-declare const process: {
-  env: {
+/// <reference types="vite/client" />
+
+declare namespace NodeJS {
+  interface ProcessEnv {
+    readonly API_KEY: string;
+    readonly SUPABASE_URL?: string;
+    readonly SUPABASE_ANON_KEY?: string;
     [key: string]: string | undefined;
-    API_KEY: string;
-    SUPABASE_URL?: string;
-    SUPABASE_ANON_KEY?: string;
   }
-};
+}
