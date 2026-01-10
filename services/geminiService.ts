@@ -31,7 +31,7 @@ const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
   return [
     {
       vendorName: "Loja do Mecânico",
-      productName: `Verificar preço na Loja do Mecânico`,
+      productName: `Buscar "${cleanPart}" na Loja do Mecânico`,
       price: 0, 
       currency: "BRL",
       description: "Clique para ver o preço atual no site",
@@ -40,7 +40,7 @@ const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
     },
     {
       vendorName: "Hipervarejo",
-      productName: `Verificar preço na Hipervarejo`,
+      productName: `Buscar "${cleanPart}" na Hipervarejo`,
       price: 0,
       currency: "BRL",
       description: "Clique para ver o preço atual no site",
@@ -49,7 +49,7 @@ const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
     },
     {
       vendorName: "Jocar",
-      productName: `Verificar preço na Jocar`,
+      productName: `Buscar "${cleanPart}" na Jocar`,
       price: 0,
       currency: "BRL",
       description: "Clique para ver o preço atual no site",
@@ -58,7 +58,7 @@ const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
     },
     {
       vendorName: "Connect Parts",
-      productName: `Verificar preço na Connect Parts`,
+      productName: `Buscar "${cleanPart}" na Connect Parts`,
       price: 0,
       currency: "BRL",
       description: "Clique para ver o preço atual no site",
@@ -95,10 +95,9 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
   1. Use o Google Search para encontrar ofertas em sites como: Loja do Mecânico, Hipervarejo, Jocar, Connect Parts, PneuStore, Autoglass, etc.
   2. IGNORE: Mercado Livre, Shopee, Amazon, AliExpress (Marketplaces genéricos).
   3. LÓGICA DE PREÇO (CRÍTICO):
-     - Se encontrar "R$ 100,00 à vista", use 100.00.
+     - Tente encontrar "R$ 100,00 à vista" e use 100.00.
      - Se encontrar "10x de R$ 30,00", CALCULE: 10 * 30 = 300.00.
-     - Se encontrar "R$ 200,00 (sem estoque)", IGNORE.
-     - O preço DEVE ser numérico e maior que zero.
+     - Se NÃO encontrar o preço, tente encontrar pelo menos o LINK do produto e retorne com price: 0.
 
   OUTPUT STRICT JSON:
   Retorne um array JSON com as 5 melhores ofertas (menor preço primeiro).
@@ -106,17 +105,18 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     {
       "vendorName": "Nome da Loja",
       "productName": "Título exato do anúncio",
-      "price": 150.50, // FLOAT OBRIGATÓRIO. NÃO USE STRINGS.
+      "price": 150.50, // Se não achar preço, coloque 0
       "link": "URL direta do produto",
-      "image": "URL da imagem (tente encontrar uma URL válida de jpg/png)",
-      "description": "Marca X, Modelo Y (Detalhes técnicos breves)"
+      "image": "URL da imagem",
+      "description": "Detalhes breves"
     }
   ]
   `;
 
   try {
+    // Aumentando timeout para 35s
     const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error("Tempo limite excedido na busca de preços.")), 30000)
+      setTimeout(() => reject(new Error("Timeout")), 35000)
     );
 
     const aiPromise = genAI.models.generateContent({
@@ -133,40 +133,52 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     const jsonText = result.text;
     const aiQuotes = cleanAndParseJSON(jsonText);
     
-    // FILTRAGEM RIGOROSA DE INTEGRIDADE
+    // FILTRAGEM
     const validQuotes = aiQuotes.map((q: any) => ({
       vendorName: q.vendorName || "Loja Especializada",
       productName: q.productName || request.partName,
-      price: (typeof q.price === 'number' && q.price > 0) ? q.price : 0,
+      price: (typeof q.price === 'number') ? q.price : 0, // Aceita 0
       currency: "BRL",
       description: q.description || "Peça Nova",
       link: q.link,
       image: q.image,
       installments: q.installments
     })).filter((q: QuoteResult) => {
-        // Regra de Ouro: Só passa se tiver preço real E link válido
-        return q.price > 0 && q.link && q.link.startsWith('http') && !q.link.includes('mercadolivre') && !q.link.includes('shopee');
+        // Aceita price >= 0, mas exige link válido e fora dos marketplaces proibidos
+        return q.price >= 0 && q.link && q.link.startsWith('http') && !q.link.includes('mercadolivre') && !q.link.includes('shopee');
     });
 
-    // Ordenação Inteligente: Menor Preço -> Maior Preço
-    validQuotes.sort((a: QuoteResult, b: QuoteResult) => a.price - b.price);
-
-    // Se falhar, lança erro para cair no tratamento visual de erro, em vez de mostrar lista vazia
+    // Se a IA não retornou NADA válido, usamos o fallback
     if (validQuotes.length === 0) {
-        throw new Error("A IA não conseguiu validar os preços finais nos sites parceiros.");
+        return {
+          quotes: generateFallbackLinks(request),
+          summary: "A IA não encontrou links diretos. Use as buscas sugeridas abaixo.",
+          groundingSources: []
+        };
     }
+
+    // Ordenação Inteligente: Menor Preço -> Maior Preço (Zeros no final)
+    validQuotes.sort((a: QuoteResult, b: QuoteResult) => {
+        if (a.price === 0) return 1;
+        if (b.price === 0) return -1;
+        return a.price - b.price;
+    });
+
+    const lowestPrice = validQuotes.find((q: any) => q.price > 0)?.price;
+    const summaryPrice = lowestPrice ? `A partir de R$ ${lowestPrice.toFixed(2)}.` : "Confira os preços nos sites.";
 
     return {
       quotes: validQuotes,
-      summary: `Análise concluída: ${validQuotes.length} ofertas validadas. Melhor preço: R$ ${validQuotes[0].price.toFixed(2)}.`,
+      summary: `Análise concluída: ${validQuotes.length} ofertas encontradas. ${summaryPrice}`,
       groundingSources: result.candidates?.[0]?.groundingMetadata?.groundingChunks || []
     };
 
   } catch (error) {
-    console.error("Erro na busca IA:", error);
+    console.error("Erro ou Timeout na busca IA:", error);
+    // Em caso de erro, SEMPRE retorna os links de fallback para não deixar o usuário na mão
     return {
       quotes: generateFallbackLinks(request),
-      summary: "Não foi possível confirmar o preço exato. Verifique os links abaixo.",
+      summary: "A busca automática demorou muito. Clique nos links diretos abaixo para ver os preços.",
       groundingSources: []
     };
   }
