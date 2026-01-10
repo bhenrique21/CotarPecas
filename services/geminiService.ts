@@ -2,16 +2,16 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 
+// Helper para aguardar tempo (backoff)
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
   let apiKey = process.env.API_KEY;
   
-  // Debug (seguro)
   if (!apiKey) {
     console.error("GeminiService: API Key está undefined ou vazia.");
   } else {
-    // Sanitização básica
     apiKey = apiKey.trim();
-    console.log("GeminiService: API Key carregada (" + apiKey.substring(0, 4) + "...)");
   }
   
   if (!apiKey) {
@@ -50,88 +50,98 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     - Priorize peças de marcas conhecidas (Bosch, Cofap, Nakata, Monroe, Moura, etc.) sobre marcas genéricas.
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            quotes: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  vendorName: { type: Type.STRING, description: "Nome da Loja" },
-                  productName: { type: Type.STRING, description: "Título Completo do Produto (Inclua marca e aplicação ex: 'Amortecedor Nakata para Onix 2020')" },
-                  price: { type: Type.NUMBER, description: "Preço numérico do produto" },
-                  currency: { type: Type.STRING, description: "Moeda (ex: BRL)" },
-                  description: { type: Type.STRING, description: "Breve descrição técnica e confirmação de compatibilidade (ex: 'Lado direito, ano 2019 a 2023')" },
-                  link: { type: Type.STRING, description: "URL direta do produto" }
-                },
-                required: ["vendorName", "productName", "price", "currency", "link"]
-              }
-            },
-            summary: { type: Type.STRING, description: "Resumo executivo de 1 parágrafo explicando as opções encontradas, variação de preços e se houve sucesso em encontrar opções na região solicitada." }
-          },
-          required: ["quotes", "summary"]
-        }
-      }
-    });
+  // Configuração de Retry
+  const MAX_RETRIES = 3;
+  let attempt = 0;
 
-    let text = response.text || "{}";
-    
-    // Limpeza robusta de Markdown (remove ```json e ```)
-    text = text.replace(/```json\n?|```/g, "").trim();
-
-    let parsedData: any = {};
-    
+  while (attempt < MAX_RETRIES) {
     try {
-        parsedData = JSON.parse(text);
-    } catch (e) {
-        console.error("JSON Parse Error. Raw text:", text);
-        console.error("Parse Error Details:", e);
-        // Não lançar erro aqui para tentar recuperar via regex se necessário futuramente, 
-        // ou retornar vazio para não quebrar a UI
-        parsedData = { quotes: [], summary: "Não foi possível estruturar os dados da busca. Tente novamente." };
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              quotes: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    vendorName: { type: Type.STRING, description: "Nome da Loja" },
+                    productName: { type: Type.STRING, description: "Título Completo do Produto (Inclua marca e aplicação ex: 'Amortecedor Nakata para Onix 2020')" },
+                    price: { type: Type.NUMBER, description: "Preço numérico do produto" },
+                    currency: { type: Type.STRING, description: "Moeda (ex: BRL)" },
+                    description: { type: Type.STRING, description: "Breve descrição técnica e confirmação de compatibilidade (ex: 'Lado direito, ano 2019 a 2023')" },
+                    link: { type: Type.STRING, description: "URL direta do produto" }
+                  },
+                  required: ["vendorName", "productName", "price", "currency", "link"]
+                }
+              },
+              summary: { type: Type.STRING, description: "Resumo executivo de 1 parágrafo explicando as opções encontradas, variação de preços e se houve sucesso em encontrar opções na região solicitada." }
+            },
+            required: ["quotes", "summary"]
+          }
+        }
+      });
+
+      let text = response.text || "{}";
+      text = text.replace(/```json\n?|```/g, "").trim();
+
+      let parsedData: any = {};
+      try {
+          parsedData = JSON.parse(text);
+      } catch (e) {
+          console.error("JSON Parse Error. Raw text:", text);
+          parsedData = { quotes: [], summary: "Não foi possível estruturar os dados da busca. Tente novamente." };
+      }
+
+      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+
+      const quotes = (parsedData.quotes || []).map((q: any) => ({
+          vendorName: q.vendorName || "Loja Desconhecida",
+          productName: q.productName || request.partName,
+          price: typeof q.price === 'number' ? q.price : parseFloat(q.price) || 0,
+          currency: q.currency || "BRL",
+          description: q.description || "",
+          link: q.link || ""
+      }));
+
+      return {
+        quotes: quotes,
+        summary: parsedData.summary || "Busca finalizada.",
+        groundingSources: groundingChunks as GroundingChunk[]
+      };
+
+    } catch (error: any) {
+      const errorMessage = error.message || "";
+      const isQuotaError = errorMessage.includes("429") || errorMessage.includes("Quota") || errorMessage.includes("ResourceExhausted");
+
+      // Se for erro de cota e ainda tivermos tentativas, aguarda e tenta de novo
+      if (isQuotaError && attempt < MAX_RETRIES - 1) {
+        attempt++;
+        // Backoff: 2s, 4s...
+        const delayMs = 2000 * Math.pow(2, attempt - 1);
+        console.warn(`Cota excedida. Tentando novamente em ${delayMs/1000}s (Tentativa ${attempt}/${MAX_RETRIES - 1})`);
+        await wait(delayMs);
+        continue;
+      }
+
+      console.error("Gemini API Error Full:", error);
+      
+      if (errorMessage.includes("API Key") || errorMessage.includes("403")) {
+          throw new Error("Erro de Autenticação: Verifique se sua API KEY é válida e está configurada corretamente na Vercel.");
+      }
+
+      if (isQuotaError) {
+           throw new Error("Muitas requisições simultâneas. O serviço gratuito do Google está congestionado. Aguarde 1 minuto e tente novamente.");
+      }
+      
+      throw new Error(`Erro na busca: ${errorMessage}`);
     }
-
-    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-
-    // Mapeia para garantir a tipagem correta
-    const quotes = (parsedData.quotes || []).map((q: any) => ({
-        vendorName: q.vendorName || "Loja Desconhecida",
-        productName: q.productName || request.partName,
-        price: typeof q.price === 'number' ? q.price : parseFloat(q.price) || 0,
-        currency: q.currency || "BRL",
-        description: q.description || "",
-        link: q.link || ""
-    }));
-
-    return {
-      quotes: quotes,
-      summary: parsedData.summary || "Busca finalizada.",
-      groundingSources: groundingChunks as GroundingChunk[]
-    };
-
-  } catch (error: any) {
-    console.error("Gemini API Error Full:", error);
-    
-    // Tratamento de erros específicos conhecidos
-    let errorMessage = error.message || "Erro desconhecido na API";
-
-    if (errorMessage.includes("API Key") || errorMessage.includes("403")) {
-        throw new Error("Erro de Autenticação: Verifique se sua API KEY é válida e está configurada corretamente na Vercel.");
-    }
-
-    if (errorMessage.includes("429")) {
-         throw new Error("Limite de requisições excedido (Quota Exceeded). Tente novamente em alguns instantes.");
-    }
-    
-    // Repassa a mensagem original para facilitar debug na UI
-    throw new Error(`Erro na busca: ${errorMessage}`);
   }
+  
+  throw new Error("Falha ao conectar com o serviço após várias tentativas.");
 };
