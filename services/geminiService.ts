@@ -5,6 +5,14 @@ import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 // Função para esperar um tempo (backoff)
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// LISTA DE MODELOS PARA ROTAÇÃO (BALANCEAMENTO DE CARGA)
+// Se um estiver com fila (429), o sistema pula para o próximo automaticamente.
+const AVAILABLE_MODELS = [
+  "gemini-2.0-flash",           // Padrão: Rápido e Estável
+  "gemini-2.0-flash-exp",       // Experimental: Fila separada, geralmente livre
+  "gemini-2.0-pro-exp-02-05"    // Pro: Mais inteligente, fila separada
+];
+
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
   const apiKey = process.env.API_KEY;
   
@@ -17,7 +25,7 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
   const hasLocation = !!(request.city || request.state);
   const locationStr = hasLocation ? `${request.city ? request.city + '-' : ''}${request.state || ''}` : 'Brasil';
 
-  // Prompt focado exclusivamente em extração de dados reais
+  // Prompt otimizado para extração direta de preços
   const prompt = `
     ATUE COMO UM ESPECIALISTA EM COTAÇÃO DE PEÇAS AUTOMOTIVAS.
     
@@ -29,29 +37,32 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
 
     REQUISITOS OBRIGATÓRIOS:
     1. Utilize a Google Search para encontrar ofertas REAIS e ATUAIS.
-    2. Busque em sites confiáveis como: Mercado Livre, Loja do Mecânico, Connect Parts, PneuStore, Hipervarejo, Autoglass, Amazon Brasil.
-    3. EXTRAIA O PREÇO REAL. Se o preço estiver parcelado (ex: 10x 30,00), calcule o total (300,00).
-    4. Se não encontrar o preço exato em um site específico, ignore esse site e busque outro. NÃO INVENTE PREÇOS.
-    5. Retorne apenas produtos que pareçam ser compatíveis com o veículo informado.
+    2. Busque em sites confiáveis como: Mercado Livre, Loja do Mecânico, Connect Parts, PneuStore, Hipervarejo, Autoglass, Amazon Brasil, Magalu.
+    3. EXTRAIA O PREÇO REAL. 
+       - Se for parcelado (ex: 10x 30,00), calcule o total (300,00).
+       - Ignore frete na extração do preço, foque no valor do produto.
+    4. Se não encontrar o preço exato, ignore o site. NÃO INVENTE PREÇOS.
+    5. Retorne apenas produtos compatíveis com o veículo informado.
 
     FORMATO DE RESPOSTA (JSON):
     Retorne um objeto JSON contendo:
     - quotes: Array com as 4 melhores opções encontradas.
-    - summary: Um resumo técnico de 1 frase sobre a disponibilidade e média de preços.
+    - summary: Um resumo técnico de 1 frase sobre a disponibilidade da peça no mercado.
   `;
 
-  // Configuração de Retry (Persistência)
-  // Tenta até 3 vezes. Se falhar na primeira (erro 429), espera e tenta de novo.
   const MAX_RETRIES = 3;
   let attempt = 0;
   let lastError: any = null;
 
   while (attempt < MAX_RETRIES) {
+    // Rotação de modelo: A cada tentativa, usa um modelo diferente da lista
+    const currentModel = AVAILABLE_MODELS[attempt % AVAILABLE_MODELS.length];
+
     try {
-      console.log(`Tentativa de cotação ${attempt + 1} de ${MAX_RETRIES}...`);
+      console.log(`Tentativa ${attempt + 1} usando modelo: ${currentModel}...`);
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash", // Modelo estável e rápido
+        model: currentModel,
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }], // Ferramenta de busca ativada
@@ -64,12 +75,12 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    vendorName: { type: Type.STRING, description: "Nome da loja (ex: Mercado Livre)" },
-                    productName: { type: Type.STRING, description: "Título do produto no anúncio" },
-                    price: { type: Type.NUMBER, description: "Preço total à vista (ex: 150.00)" },
-                    currency: { type: Type.STRING, description: "Sempre BRL" },
-                    description: { type: Type.STRING, description: "Breve descrição ou condição" },
-                    link: { type: Type.STRING, description: "URL direta para o produto" }
+                    vendorName: { type: Type.STRING, description: "Nome da loja" },
+                    productName: { type: Type.STRING, description: "Título do produto" },
+                    price: { type: Type.NUMBER, description: "Preço à vista" },
+                    currency: { type: Type.STRING, description: "BRL" },
+                    description: { type: Type.STRING, description: "Condição de pagto ou detalhe" },
+                    link: { type: Type.STRING, description: "URL do produto" }
                   },
                   required: ["vendorName", "productName", "price", "currency", "link"]
                 }
@@ -81,15 +92,15 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
         }
       });
 
-      // Se chegamos aqui, a requisição funcionou. Vamos processar.
+      // Processamento da resposta
       let text = response.text || "{}";
-      text = text.replace(/```json\n?|```/g, "").trim(); // Limpeza de segurança
+      text = text.replace(/```json\n?|```/g, "").trim();
 
       const parsedData = JSON.parse(text);
       const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
       const quotes = (parsedData.quotes || []).map((q: any) => ({
-          vendorName: q.vendorName || "Fornecedor",
+          vendorName: q.vendorName || "Loja Online",
           productName: q.productName || request.partName,
           price: typeof q.price === 'number' ? q.price : 0,
           currency: "BRL",
@@ -97,9 +108,9 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
           link: q.link || ""
       }));
 
-      // Validação: Se a IA retornou array vazio, consideramos falha e tentamos de novo (se tiver tentativas)
+      // Se a lista vier vazia, força o erro para tentar o próximo modelo (pode ser que o modelo atual esteja "burro" hoje)
       if (quotes.length === 0 && attempt < MAX_RETRIES - 1) {
-          throw new Error("IA retornou lista vazia, tentando novamente...");
+          throw new Error("Lista vazia retornada pelo modelo.");
       }
 
       return {
@@ -112,20 +123,24 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
       lastError = error;
       const errorMessage = error.message || "";
       
-      // Verifica se é erro de tráfego (429) ou erro de servidor (503)
-      const isTrafficError = errorMessage.includes("429") || errorMessage.includes("503") || errorMessage.includes("Quota");
+      console.warn(`Erro no modelo ${currentModel}: ${errorMessage}`);
+
+      // Erros que justificam tentar outro modelo (Fila, Cota, Erro de Servidor, Timeout)
+      const isRetryable = errorMessage.includes("429") || 
+                          errorMessage.includes("503") || 
+                          errorMessage.includes("Quota") || 
+                          errorMessage.includes("fetch failed") ||
+                          errorMessage.includes("Lista vazia");
       
-      if (isTrafficError || errorMessage.includes("lista vazia")) {
+      if (isRetryable) {
         attempt++;
         if (attempt < MAX_RETRIES) {
-          // Backoff Exponencial: Espera 2s, depois 4s, depois 8s...
-          const delay = 2000 * Math.pow(2, attempt - 1);
-          console.warn(`Erro de tráfego (${errorMessage}). Aguardando ${delay}ms para tentar novamente...`);
-          await wait(delay);
-          continue; // Volta para o início do while
+          // Espera mínima para dar tempo de trocar o "canal"
+          await wait(1500);
+          continue; 
         }
       } else {
-        // Se for outro erro (ex: chave inválida), falha imediatamente
+        // Erros fatais (ex: chave inválida) param imediatamente
         throw error;
       }
     }
@@ -133,7 +148,6 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     attempt++;
   }
 
-  // Se saiu do loop, falhou todas as tentativas
-  console.error("Falha definitiva após retries:", lastError);
-  throw new Error("O sistema de cotação está momentaneamente sobrecarregado com muitos pedidos. Por favor, aguarde 10 segundos e tente novamente para obter preços reais.");
+  console.error("Todas as tentativas de rotação falharam.", lastError);
+  throw new Error("Alta demanda no momento. Nossos servidores estão alternando conexões, mas todas estão ocupadas. Por favor, tente novamente em 15 segundos.");
 };
