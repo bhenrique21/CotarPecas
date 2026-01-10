@@ -5,13 +5,20 @@ import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
   const apiKey = process.env.API_KEY;
   
+  // Debug (seguro) para verificar no console do navegador se a chave foi injetada
   if (!apiKey) {
-    throw new Error("API Key not configured. Verifique as variáveis de ambiente.");
+    console.error("GeminiService: API Key está undefined ou vazia.");
+  } else {
+    console.log("GeminiService: API Key carregada com sucesso (" + apiKey.substring(0, 4) + "...)");
+  }
+  
+  if (!apiKey) {
+    throw new Error("API Key not configured. A variável de ambiente API_KEY não foi encontrada.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // Construção de query para contexto (não usado diretamente na API nova, mas útil para debug se necessário)
+  // Construção de query para contexto
   const hasLocation = !!(request.city || request.state);
 
   const prompt = `
