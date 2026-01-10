@@ -2,75 +2,118 @@
 import { QuoteRequest, SearchResponse } from "../types";
 
 /**
- * SERVIÇO DE LINKS DIRETOS (AGREGADOR)
+ * SERVIÇO DE DEEP LINKS (Foco em Menor Preço)
  * 
- * Em vez de usar IA para tentar "ler" a internet (o que é lento e sujeito a cotas),
- * este serviço constrói URLs inteligentes que levam o usuário DIRETAMENTE
- * para as páginas de resultados das lojas, já com filtros aplicados.
+ * Gera links diretos para buscas filtradas por "Menor Preço" nas principais plataformas.
+ * Não usa IA, garantindo velocidade instantânea e zero custo/cotas.
  */
 
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
-  // Simula um pequeno delay para dar sensação de processamento na UI
-  await new Promise(resolve => setTimeout(resolve, 600));
+  // Delay mínimo apenas para feedback visual de carregamento
+  await new Promise(resolve => setTimeout(resolve, 500));
 
   const cleanPart = request.partName.trim();
   const vehicle = `${request.make} ${request.model} ${request.year}`;
+  
+  // Termos de busca otimizados
   const fullTerm = `${cleanPart} ${vehicle}`;
-  const encodedTerm = encodeURIComponent(fullTerm);
-  const encodedPart = encodeURIComponent(cleanPart);
-  const encodedVehicle = encodeURIComponent(vehicle);
+  const encodedFullTerm = encodeURIComponent(fullTerm);
+  const encodedPartOnly = encodeURIComponent(`${cleanPart} ${request.make} ${request.model}`);
 
-  // Construção de URLs com Parâmetros de Ordenação por Preço (onde possível)
-
+  // Estratégia: Gerar uma lista priorizada de onde encontrar mais barato
   const quotes = [
     {
-      vendorName: "Google Shopping",
-      productName: `Comparar preços: ${cleanPart} para ${request.model}`,
-      price: 0, // 0 indica para a UI que é um link de comparação
-      currency: "BRL",
-      description: "Melhor para comparar diversas lojas (PneuStore, Hipervarejo, etc) de uma só vez.",
-      // tbm=shop: Google Shopping | tbs=p_ord:p: Ordenar por Preço Crescente
-      link: `https://www.google.com/search?tbm=shop&q=${encodedTerm}&tbs=p_ord:p`
-    },
-    {
       vendorName: "Mercado Livre",
-      productName: `Ofertas de ${cleanPart} - ${request.make} ${request.model}`,
-      price: 0,
+      productName: `Menores preços para ${cleanPart}`,
+      price: 0, 
       currency: "BRL",
-      description: "Resultados ordenados pelo MENOR PREÇO. Verifique a reputação do vendedor.",
-      // _OrderId_PRICE_ASC: Ordena por menor preço
+      description: "Classificados do menor para o maior preço.",
+      // Filtro: _OrderId_PRICE_ASC
       link: `https://lista.mercadolivre.com.br/pecas/${request.partName.replace(/\s+/g, '-')}-${request.make}-${request.model}-${request.year}_OrderId_PRICE_ASC`
     },
     {
-      vendorName: "Amazon Brasil",
-      productName: `Peças Automotivas: ${request.model} ${request.year}`,
+      vendorName: "Google Shopping",
+      productName: `Comparador: ${cleanPart}`,
       price: 0,
       currency: "BRL",
-      description: "Frete grátis para membros Prime em muitos itens. Peças originais e reposição.",
-      // s=price-asc-rank: Ordenar por menor preço
-      link: `https://www.amazon.com.br/s?k=${encodedTerm}&i=automotive&s=price-asc-rank`
+      description: "Varredura em centenas de lojas menores.",
+      // Filtro: tbs=p_ord:p (Preço crescrente)
+      link: `https://www.google.com/search?tbm=shop&q=${encodedFullTerm}&tbs=p_ord:p`
     },
     {
       vendorName: "Shopee",
-      productName: `Busca Geral: ${cleanPart}`,
+      productName: `Ofertas Econômicas: ${cleanPart}`,
       price: 0,
       currency: "BRL",
-      description: "Opções econômicas. Atenção aos prazos de entrega.",
-      link: `https://shopee.com.br/search?keyword=${encodedTerm}`
+      description: "Peças importadas e paralelas com desconto.",
+      // Filtro: order=asc&sortBy=price
+      link: `https://shopee.com.br/search?keyword=${encodedFullTerm}&order=asc&sortBy=price`
     },
     {
-      vendorName: "YouTube (Tutoriais)",
-      productName: `Como trocar ${cleanPart} ${request.model}`,
+      vendorName: "Amazon",
+      productName: `${cleanPart} com entrega rápida`,
       price: 0,
       currency: "BRL",
-      description: "Veja vídeos de como instalar ou verificar esta peça no seu carro.",
-      link: `https://www.youtube.com/results?search_query=trocar+${encodedTerm}`
+      description: "Peças de reposição e acessórios.",
+      // Filtro: s=price-asc-rank
+      link: `https://www.amazon.com.br/s?k=${encodedFullTerm}&i=automotive&s=price-asc-rank`
+    },
+    {
+      vendorName: "Magazine Luiza",
+      productName: `Magalu: ${cleanPart}`,
+      price: 0,
+      currency: "BRL",
+      description: "Ofertas em lojas parceiras Magalu.",
+      // Busca simples (Magalu não aceita sort via URL facilmente, mas a busca é relevante)
+      link: `https://www.magazineluiza.com.br/busca/${fullTerm}/`
+    },
+    // --- ITENS ABAIXO SÓ APARECEM AO CLICAR EM "MOSTRAR MAIS" ---
+    {
+      vendorName: "Americanas",
+      productName: `Peças Americanas`,
+      price: 0,
+      currency: "BRL",
+      description: "Marketplace de autopeças.",
+      link: `https://www.americanas.com.br/busca/${encodedFullTerm}?sortBy=lowerPrice`
+    },
+    {
+      vendorName: "OLX",
+      productName: `Usados/Seminovos: ${request.state || 'Brasil'}`,
+      price: 0,
+      currency: "BRL",
+      description: "Ideal para peças de lataria ou desmanche.",
+      // Filtro de estado se disponível, senão Brasil
+      link: `https://www.olx.com.br/autos-e-pecas/pecas-e-acessorios/${request.state ? `estado-${request.state.toLowerCase()}` : 'brasil'}?q=${encodedFullTerm}&sf=1`
+    },
+    {
+      vendorName: "Casas Bahia",
+      productName: `Ofertas Casas Bahia`,
+      price: 0,
+      currency: "BRL",
+      description: "Marketplace automotivo.",
+      link: `https://www.casasbahia.com.br/${fullTerm}/b`
+    },
+    {
+      vendorName: "AliExpress",
+      productName: `Importação Direta`,
+      price: 0,
+      currency: "BRL",
+      description: "Preços de fábrica da China (prazo maior).",
+      link: `https://pt.aliexpress.com/wholesale?SearchText=${encodedFullTerm}&SortType=price_asc`
+    },
+    {
+      vendorName: "YouTube",
+      productName: `Vídeo: Como trocar`,
+      price: 0,
+      currency: "BRL",
+      description: "Não gaste com mecânico, veja como fazer.",
+      link: `https://www.youtube.com/results?search_query=como+trocar+${encodedFullTerm}`
     }
   ];
 
   return {
     quotes: quotes,
-    summary: `Geramos links de busca direta para **${request.partName}** do veículo **${request.make} ${request.model} ${request.year}**. Clique nos cartões abaixo para ver os preços em tempo real diretamente nas lojas.`,
+    summary: "",
     groundingSources: []
   };
 };
