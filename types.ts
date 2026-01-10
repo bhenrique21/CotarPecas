@@ -23,8 +23,6 @@ export interface QuoteResult {
   productName: string;
   description?: string;
   link?: string;
-  image?: string; // URL da imagem do produto
-  installments?: string; // Texto do parcelamento (ex: 10x de R$ 20,00)
 }
 
 export interface GroundingChunk {
