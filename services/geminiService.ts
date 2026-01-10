@@ -1,75 +1,10 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { QuoteRequest, SearchResponse, GroundingChunk, QuoteResult } from "../types";
-
-// Helper para aguardar tempo (backoff)
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-/**
- * Gera links manuais de busca caso a IA falhe.
- * Isso garante que o usuário nunca fique sem resposta.
- */
-const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
-  const term = `${request.partName} ${request.make} ${request.model} ${request.year}`;
-  const encodedTerm = encodeURIComponent(term);
-  const encodedPart = encodeURIComponent(request.partName);
-
-  return [
-    {
-      vendorName: "Mercado Livre",
-      productName: `Ofertas no Mercado Livre: ${request.partName}`,
-      price: 0, // Indica que o preço deve ser consultado
-      currency: "BRL",
-      description: "Maior variedade de peças com entrega rápida e compra garantida.",
-      link: `https://lista.mercadolivre.com.br/${encodedTerm.replace(/%20/g, '-')}`
-    },
-    {
-      vendorName: "Loja do Mecânico",
-      productName: `Busca na Loja do Mecânico`,
-      price: 0,
-      currency: "BRL",
-      description: "Maior loja de máquinas e ferramentas da América Latina.",
-      link: `https://www.lojadomecanico.com.br/busca?q=${encodedTerm}`
-    },
-    {
-      vendorName: "Google Shopping",
-      productName: `Comparar preços no Google`,
-      price: 0,
-      currency: "BRL",
-      description: "Veja todas as opções disponíveis na web para sua peça.",
-      link: `https://www.google.com/search?tbm=shop&q=${encodedTerm}`
-    },
-    {
-      vendorName: "Connect Parts",
-      productName: `Busca na Connect Parts`,
-      price: 0,
-      currency: "BRL",
-      description: "Especialista em acessórios e som automotivo.",
-      link: `https://www.connectparts.com.br/busca?q=${encodedTerm}`
-    }
-  ];
-};
+import { QuoteRequest, SearchResponse, GroundingChunk } from "../types";
 
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
-  let apiKey = process.env.API_KEY;
-  
-  if (!apiKey) {
-    console.error("GeminiService: API Key está undefined ou vazia.");
-  } else {
-    apiKey = apiKey.trim();
-  }
-  
-  // Se não tiver chave, retorna fallback imediatamente sem erro
-  if (!apiKey) {
-    return {
-      quotes: generateFallbackLinks(request),
-      summary: "Modo offline: Chave de API não configurada. Veja os links diretos abaixo.",
-      groundingSources: []
-    };
-  }
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  const ai = new GoogleGenAI({ apiKey });
-
+  // Construção de query para contexto (não usado diretamente na API nova, mas útil para debug se necessário)
   const hasLocation = !!(request.city || request.state);
 
   const prompt = `
@@ -78,114 +13,89 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     DADOS DO PEDIDO:
     Veículo: ${request.make} ${request.model} ${request.year} (${request.vehicleType})
     Peça: "${request.partName}"
-    Localização: ${hasLocation ? (request.city ? request.city + ' - ' : '') + (request.state || '') : 'Brasil'}
+    Localização Preferencial: ${hasLocation ? (request.city ? request.city + ' - ' : '') + (request.state || '') : 'Brasil (Todo o território)'}
 
-    OBJETIVO:
-    Listar 4 a 5 opções de compra ONLINE para esta peça exata.
+    OBJETIVO CRÍTICO:
+    Localizar a peça EXATA compatível com este veículo específico em lojas online, retornando o LINK DIRETO para a página de compra do produto.
 
-    REGRAS:
-    1. Tente encontrar o preço exato. Se achar "10x de 30,00", o preço é 300.00.
-    2. Se não encontrar o preço exato, mas encontrar o produto, coloque o preço como 0 (zero).
-    3. O Link DEVE levar ao produto ou à busca dele.
+    REGRAS DE OURO (COMPATIBILIDADE 100%):
+    1. RIGOR TOTAL NO ANO E MODELO: A peça DEVE servir no ${request.model} ano ${request.year}. Verifique a faixa de anos da peça (ex: se a peça é 2012-2016 e o carro é 2018, NÃO SERVE).
+    2. LINK DIRETO (DEEP LINK): O campo 'link' DEVE ser a URL DIRETA da página do produto (onde há o botão "Comprar").
+    3. PROIBIDO LINKS DE LISTA: Não retorne links de resultados de busca (ex: site.com/busca?q=...) a menos que seja absolutamente impossível encontrar o item específico. O usuário quer o produto final.
     
-    Priorize lojas: Mercado Livre, Loja do Mecânico, Hipervarejo, PneuStore, Autoglass.
+    DIRETRIZES DE PRIORIDADE DE LOJAS E LOCALIZAÇÃO:
+    1. ${hasLocation ? `PRIORIDADE REGIONAL: Tente encontrar fornecedores que atendam ou estejam localizados em ${request.state || request.city}.` : ''}
+    2. PRIORIDADE MÁXIMA (Especializadas): Hipervarejo, Connect Parts, Loja do Mecânico, PneuStore, Autoglass, Jocar, AutoZ, MercadoCar, Koga Koga.
+    3. MARKETPLACES: Mercado Livre, Amazon, Shopee (verifique se são vendedores bem avaliados).
+    4. Se houver opções locais (na região de ${request.state || request.city}), destaque isso na descrição. Caso contrário, liste grandes e-commerces que entregam em todo o Brasil.
+
+    INSTRUÇÕES DE PESQUISA:
+    - Utilize a ferramenta de busca para encontrar URLs reais de produtos (PDP - Product Detail Pages).
+    - Priorize peças de marcas conhecidas (Bosch, Cofap, Nakata, Monroe, Moura, etc.) sobre marcas genéricas.
   `;
 
-  const MAX_RETRIES = 2; // Reduzido para ser mais rápido no fallback
-  let attempt = 0;
-
-  while (attempt <= MAX_RETRIES) {
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              quotes: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    vendorName: { type: Type.STRING },
-                    productName: { type: Type.STRING },
-                    price: { type: Type.NUMBER },
-                    currency: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    link: { type: Type.STRING }
-                  },
-                  required: ["vendorName", "productName", "price", "currency", "link"]
-                }
-              },
-              summary: { type: Type.STRING }
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            quotes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  vendorName: { type: Type.STRING, description: "Nome da Loja" },
+                  productName: { type: Type.STRING, description: "Título Completo do Produto (Inclua marca e aplicação ex: 'Amortecedor Nakata para Onix 2020')" },
+                  price: { type: Type.NUMBER, description: "Preço numérico do produto" },
+                  currency: { type: Type.STRING, description: "Moeda (ex: BRL)" },
+                  description: { type: Type.STRING, description: "Breve descrição técnica e confirmação de compatibilidade (ex: 'Lado direito, ano 2019 a 2023')" },
+                  link: { type: Type.STRING, description: "URL direta do produto" }
+                },
+                required: ["vendorName", "productName", "price", "currency", "link"]
+              }
             },
-            required: ["quotes", "summary"]
-          }
+            summary: { type: Type.STRING, description: "Resumo executivo de 1 parágrafo explicando as opções encontradas, variação de preços e se houve sucesso em encontrar opções na região solicitada." }
+          },
+          required: ["quotes", "summary"]
         }
-      });
-
-      let text = response.text || "{}";
-      text = text.replace(/```json\n?|```/g, "").trim();
-      let parsedData: any = {};
-      
-      try {
-          parsedData = JSON.parse(text);
-      } catch (e) {
-          throw new Error("Falha no parse do JSON");
       }
+    });
 
-      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-
-      // Filtra e valida
-      let quotes = (parsedData.quotes || []).map((q: any) => ({
-          vendorName: q.vendorName || "Loja Online",
-          productName: q.productName || request.partName,
-          price: typeof q.price === 'number' ? q.price : 0,
-          currency: q.currency || "BRL",
-          description: q.description || "",
-          link: q.link || ""
-      }));
-
-      // Se a IA retornou lista vazia, forçamos o erro para cair no fallback
-      if (quotes.length === 0) {
-        throw new Error("IA não encontrou resultados");
-      }
-
-      return {
-        quotes: quotes,
-        summary: parsedData.summary || "Opções encontradas.",
-        groundingSources: groundingChunks as GroundingChunk[]
-      };
-
-    } catch (error: any) {
-      const errorMessage = error.message || "";
-      const isQuotaError = errorMessage.includes("429") || errorMessage.includes("Quota") || errorMessage.includes("ResourceExhausted") || errorMessage.includes("503");
-
-      if (attempt < MAX_RETRIES) {
-        attempt++;
-        const delayMs = 1500 * attempt; // Backoff rápido
-        await wait(delayMs);
-        continue;
-      }
-      
-      // SE FALHAR APÓS TENTATIVAS (OU COTA EXCEDIDA), RETORNA FALLBACK
-      console.warn("Retornando fallback devido a erro na IA:", errorMessage);
-      
-      return {
-        quotes: generateFallbackLinks(request),
-        summary: "Devido ao alto volume de buscas, nossa IA está congestionada. Selecionamos abaixo os links diretos para você consultar o preço em tempo real nas melhores lojas.",
-        groundingSources: []
-      };
+    const text = response.text || "{}";
+    let parsedData: any = {};
+    
+    try {
+        parsedData = JSON.parse(text);
+    } catch (e) {
+        console.error("JSON Parse Error", e);
+        parsedData = { quotes: [], summary: "Não foi possível estruturar os dados da busca." };
     }
+
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+
+    // Mapeia para garantir a tipagem correta
+    const quotes = (parsedData.quotes || []).map((q: any) => ({
+        vendorName: q.vendorName || "Loja Desconhecida",
+        productName: q.productName || request.partName,
+        price: typeof q.price === 'number' ? q.price : parseFloat(q.price) || 0,
+        currency: q.currency || "BRL",
+        description: q.description || "",
+        link: q.link || ""
+    }));
+
+    return {
+      quotes: quotes,
+      summary: parsedData.summary || "Busca finalizada.",
+      groundingSources: groundingChunks as GroundingChunk[]
+    };
+
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    throw new Error("Falha ao conectar com o serviço de cotação. Verifique sua conexão ou tente novamente.");
   }
-  
-  // Fallback final de segurança
-  return {
-      quotes: generateFallbackLinks(request),
-      summary: "Serviço momentaneamente indisponível. Utilize os links diretos abaixo.",
-      groundingSources: []
-  };
 };

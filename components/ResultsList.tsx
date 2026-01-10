@@ -1,4 +1,3 @@
-
 import React, { useMemo } from 'react';
 import { QuoteResult, GroundingChunk } from '../types';
 
@@ -11,16 +10,7 @@ interface ResultsListProps {
 const ResultsList: React.FC<ResultsListProps> = ({ quotes, summary, groundingSources }) => {
   
   const sortedQuotes = useMemo(() => {
-    // Ordena: Preço menor primeiro, mas zeros (sem preço) vão para o final da lista,
-    // a menos que TODOS sejam zero (fallback mode), aí mantemos a ordem original
-    const allZero = quotes.every(q => q.price === 0);
-    if (allZero) return quotes;
-
-    return [...quotes].sort((a, b) => {
-        if (a.price === 0) return 1;
-        if (b.price === 0) return -1;
-        return a.price - b.price;
-    });
+    return [...quotes].sort((a, b) => a.price - b.price);
   }, [quotes]);
 
   if (quotes.length === 0) {
@@ -32,42 +22,31 @@ const ResultsList: React.FC<ResultsListProps> = ({ quotes, summary, groundingSou
           </svg>
         </div>
         <h3 className="text-lg md:text-xl font-bold text-slate-700 font-heading">Nenhuma cotação encontrada</h3>
-        <p className="text-slate-500 mt-2 max-w-md mx-auto text-sm md:text-base">Tente simplificar o nome da peça ou verifique a conexão.</p>
+        <p className="text-slate-500 mt-2 max-w-md mx-auto text-sm md:text-base">Não encontramos peças com as especificações exatas. Tente simplificar o nome da peça (ex: apenas "Amortecedor") ou verifique a ortografia.</p>
       </div>
     );
   }
 
   const formatPrice = (price: number) => {
-    if (price === 0) return "Ver no site";
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(price);
   };
-
-  const isFallback = quotes.every(q => q.price === 0);
 
   return (
     <div className="mt-8 md:mt-10 space-y-8 md:space-y-10 animate-fade-in-up">
       
       {/* AI Insight Summary */}
-      <div className={`p-5 md:p-8 rounded-2xl shadow-lg relative overflow-hidden ring-1 ${isFallback ? 'bg-slate-700 ring-slate-600' : 'bg-brand-blue ring-blue-700'} text-white`}>
-        <div className={`absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 md:w-32 md:h-32 rounded-full opacity-20 blur-2xl ${isFallback ? 'bg-slate-400' : 'bg-brand-orange'}`}></div>
+      <div className="bg-brand-blue text-white p-5 md:p-8 rounded-2xl shadow-lg relative overflow-hidden ring-1 ring-blue-700">
+        <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 md:w-32 md:h-32 bg-brand-orange rounded-full opacity-20 blur-2xl"></div>
         <div className="relative z-10 flex gap-4 items-start">
-          <div className={`p-2.5 rounded-xl text-white shadow-lg hidden md:block shrink-0 ${isFallback ? 'bg-slate-600' : 'bg-brand-orange'}`}>
-            {isFallback ? (
-                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-            ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-            )}
+          <div className="bg-brand-orange p-2.5 rounded-xl text-white shadow-lg hidden md:block shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
           </div>
           <div>
-            <h3 className={`${isFallback ? 'text-slate-300' : 'text-orange-400'} font-bold uppercase tracking-wider text-xs md:text-sm mb-2 font-heading flex items-center gap-2`}>
-                <span className={`md:hidden px-2 py-0.5 rounded ${isFallback ? 'bg-slate-600 text-slate-200' : 'bg-brand-orange/20 text-orange-300'}`}>
-                    {isFallback ? 'Info' : 'IA'}
-                </span>
-                {isFallback ? 'Busca Direta' : 'Análise Inteligente'}
+            <h3 className="text-orange-400 font-bold uppercase tracking-wider text-xs md:text-sm mb-2 font-heading flex items-center gap-2">
+                <span className="md:hidden bg-brand-orange/20 px-2 py-0.5 rounded text-orange-300">IA</span>
+                Análise Inteligente
             </h3>
             <p className="text-blue-50 leading-relaxed text-sm md:text-lg font-light tracking-wide">{summary}</p>
           </div>
@@ -76,14 +55,13 @@ const ResultsList: React.FC<ResultsListProps> = ({ quotes, summary, groundingSou
 
       <div>
         <h3 className="text-xl md:text-2xl font-bold text-slate-800 mb-6 font-heading border-l-4 border-brand-orange pl-4">
-          {isFallback ? 'Links para Consulta' : 'Melhores Ofertas Encontradas'}
+          Melhores Ofertas Encontradas
         </h3>
 
         {/* Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 md:gap-6">
           {sortedQuotes.map((quote, index) => {
-            const hasPrice = quote.price > 0;
-            const isBestPrice = index === 0 && hasPrice && !isFallback;
+            const isBestPrice = index === 0;
             
             return (
               <div 
@@ -120,14 +98,12 @@ const ResultsList: React.FC<ResultsListProps> = ({ quotes, summary, groundingSou
                   </h4>
                   
                   <div className="mb-6 flex-grow">
-                     <p className="text-xs md:text-sm text-slate-500 line-clamp-3 leading-relaxed">{quote.description || "Verifique a disponibilidade no site do vendedor."}</p>
+                     <p className="text-xs md:text-sm text-slate-500 line-clamp-3 leading-relaxed">{quote.description || "Compatibilidade confirmada para o modelo selecionado."}</p>
                   </div>
 
                   <div className="mt-auto pt-4 border-t border-slate-100">
                     <div className="flex flex-col mb-4">
-                      <span className="text-[10px] md:text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                          {hasPrice ? 'Valor à vista' : 'Preço no site'}
-                      </span>
+                      <span className="text-[10px] md:text-xs text-slate-400 font-semibold uppercase tracking-wider">Valor à vista</span>
                       <span className={`text-2xl md:text-3xl font-extrabold font-heading ${isBestPrice ? 'text-brand-orange' : 'text-slate-900'}`}>
                         {formatPrice(quote.price)}
                       </span>
@@ -143,7 +119,7 @@ const ResultsList: React.FC<ResultsListProps> = ({ quotes, summary, groundingSou
                           : 'bg-brand-blue text-white hover:bg-blue-900 hover:shadow-lg active:scale-95'
                       } ${!quote.link ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      {quote.link ? (hasPrice ? 'Ir para a Loja' : 'Ver Oferta') : 'Link Indisponível'}
+                      {quote.link ? 'Ir para a Loja' : 'Link Indisponível'}
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                       </svg>
