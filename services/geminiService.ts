@@ -12,7 +12,6 @@ const genAI = process.env.API_KEY
  */
 const cleanAndParseJSON = (text: string): any => {
   try {
-    // Remove marcadores de código markdown se existirem
     const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
     return JSON.parse(cleaned);
   } catch (e) {
@@ -22,37 +21,50 @@ const cleanAndParseJSON = (text: string): any => {
 };
 
 /**
- * GERA LINKS DE FALLBACK
- * Usado quando a IA falha ou não tem API Key
+ * GERA LINKS DE FALLBACK (Focado EXCLUSIVAMENTE em Lojas de Autopeças)
+ * Usado apenas se a IA falhar totalmente.
  */
 const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
-  const searchTerm = encodeURIComponent(`${request.partName} ${request.make} ${request.model} ${request.year}`);
-  
+  const cleanPart = request.partName.trim();
+  const fullTerm = `${cleanPart} ${request.make} ${request.model} ${request.year}`;
+  const encodedTerm = encodeURIComponent(fullTerm);
+
   return [
     {
-      vendorName: "Mercado Livre",
-      productName: `Busca por ${request.partName}`,
+      vendorName: "Loja do Mecânico",
+      productName: `Buscar "${cleanPart}" na Loja do Mecânico`,
       price: 0, 
       currency: "BRL",
-      description: "Verificar disponibilidade e preços no Mercado Livre",
-      link: `https://lista.mercadolivre.com.br/${request.partName}-${request.make}-${request.model}-${request.year}`,
-      image: "https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/5.21.22/mercadolibre/logo__large_plus.png"
+      description: "Maior loja de máquinas e ferramentas da América Latina.",
+      link: `https://www.lojadomecanico.com.br/busca?q=${encodedTerm}`,
+      image: "https://www.lojadomecanico.com.br/imagens/logo-loja-do-mecanico.png"
     },
     {
-      vendorName: "Google Shopping",
-      productName: "Comparar Preços no Google",
+      vendorName: "Hipervarejo",
+      productName: `Buscar na Hipervarejo`,
       price: 0,
       currency: "BRL",
-      description: "Veja várias opções no Google Shopping",
-      link: `https://www.google.com/search?tbm=shop&q=${searchTerm}`
+      description: "Especialista em peças e pneus.",
+      link: `https://www.hipervarejo.com.br/busca?q=${encodedTerm}`,
+      image: "https://images.tcdn.com.br/img/img_prod/717887/1634925769_logo_hipervarejo.png"
     },
     {
-      vendorName: "Amazon Brasil",
-      productName: "Peças na Amazon",
+      vendorName: "Jocar",
+      productName: `Buscar na Jocar`,
       price: 0,
       currency: "BRL",
-      description: "Frete grátis para membros Prime em produtos elegíveis",
-      link: `https://www.amazon.com.br/s?k=${searchTerm}&i=automotive`
+      description: "A loja de autopeças online.",
+      link: `https://www.jocar.com.br/busca/?q=${encodedTerm}`,
+      image: "https://www.jocar.com.br/Imagens/logo-jocar.png"
+    },
+    {
+      vendorName: "Connect Parts",
+      productName: `Buscar na Connect Parts`,
+      price: 0,
+      currency: "BRL",
+      description: "Som, vídeo e acessórios automotivos.",
+      link: `https://www.connectparts.com.br/busca?q=${encodedTerm}`,
+      image: "https://www.connectparts.com.br/arquivos/logo-connect-parts.png"
     }
   ];
 };
@@ -62,51 +74,72 @@ const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
  */
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
   if (!genAI) {
-    console.warn("API Key não encontrada. Retornando links de fallback.");
     return {
       quotes: generateFallbackLinks(request),
-      summary: "Modo de demonstração (sem API Key). Redirecionando para buscas diretas.",
+      summary: "Modo offline: Acesse diretamente as lojas especializadas.",
       groundingSources: []
     };
   }
 
+  // Prompt desenhado para ignorar marketplaces e focar em dados estruturados de lojas reais
   const prompt = `
-  Você é um assistente de cotação de peças automotivas.
-  O usuário precisa da peça: "${request.partName}"
-  Veículo: ${request.make} ${request.model} ${request.year}
-  Localização (opcional): ${request.city ? request.city + '-' : ''}${request.state || 'Brasil'}
-
-  TAREFA:
-  1. Pesquise na internet (Google Shopping, Mercado Livre, lojas de autopeças online) por esta peça específica.
-  2. Retorne uma lista de 4 a 6 opções de compra reais ou estimadas.
-  3. Priorize lojas confiáveis (Ex: Loja do Mecânico, Mercado Livre (Lojas Oficiais), Amazon, PneuStore, etc).
-  4. Inclua o link direto para o produto se possível.
+  Você é um especialista em compras de autopeças (Auto Parts Sniper).
   
-  FORMATO DE RESPOSTA (JSON Array):
+  MISSÃO: Encontrar o MENOR PREÇO REAL para a peça solicitada, ignorando marketplaces genéricos.
+  
+  DADOS DA BUSCA:
+  - Peça: "${request.partName}"
+  - Veículo: "${request.make} ${request.model} ${request.year}"
+  - Localização: Brasil
+  
+  REGRAS DE OURO (Whitelisting):
+  1. BUSQUE APENAS nestes domínios confiáveis e similares (Lojas Oficiais de Autopeças):
+     - lojadomecanico.com.br
+     - hipervarejo.com.br
+     - jocar.com.br
+     - connectparts.com.br
+     - autoglass.com.br
+     - pneustore.com.br
+     - kdpneus.com.br
+     - dellavia.com.br
+     - canaldapeca.com.br
+     - autoz.com.br
+  
+  2. PROIBIDO (Blacklisting):
+     - NÃO retorne resultados do Mercado Livre (mercadolivre.com.br).
+     - NÃO retorne resultados da Shopee.
+     - NÃO retorne resultados da Amazon.
+     - NÃO retorne resultados da OLX ou AliExpress.
+  
+  3. EXTRAÇÃO DE DADOS:
+     - Você DEVE extrair o preço numérico exato (ex: 150.00). Não retorne 0 se encontrar o produto.
+     - O link DEVE ser direto para o produto, não para a home ou busca genérica.
+  
+  SAÍDA ESPERADA (JSON ARRAY):
+  Retorne um JSON puro com 5 a 8 opções encontradas.
   [
     {
-      "vendorName": "Nome da Loja",
-      "productName": "Título do produto encontrado",
-      "price": 100.00, (apenas números)
-      "currency": "BRL",
-      "description": "Breve descrição (marca, condição)",
-      "link": "URL do produto",
-      "image": "URL de uma imagem do produto (opcional)"
+      "vendorName": "Nome da Loja (ex: Hipervarejo)",
+      "productName": "Título completo do produto",
+      "price": 129.90, (Número float, use ponto para decimais)
+      "link": "URL completa do produto",
+      "image": "URL da imagem (se conseguir extrair)",
+      "description": "Detalhes breves (ex: Marca Cofap, Dianteiro)"
     }
   ]
   `;
 
   try {
-    // Timeout de 20s para a requisição
+    // Timeout para garantir UX (25 segundos)
     const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error("Tempo limite de busca excedido")), 20000)
+      setTimeout(() => reject(new Error("A busca demorou muito. Tente novamente.")), 25000)
     );
 
     const aiPromise = genAI.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.0-flash-exp", // Modelo rápido com capacidade de busca atualizada
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }],
+        tools: [{ googleSearch: {} }], // Força o uso da busca do Google
         responseMimeType: "application/json" 
       }
     });
@@ -116,20 +149,36 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     const jsonText = result.text;
     const aiQuotes = cleanAndParseJSON(jsonText);
     
-    // Validação básica dos dados
+    // Filtragem e Validação Rigorosa
     const validQuotes = aiQuotes.map((q: any) => ({
-      vendorName: q.vendorName || "Fornecedor Desconhecido",
+      vendorName: q.vendorName || "Loja Especializada",
       productName: q.productName || request.partName,
-      price: typeof q.price === 'number' ? q.price : 0,
-      currency: q.currency || "BRL",
-      description: q.description || "",
-      link: q.link || `https://www.google.com/search?q=${encodeURIComponent(request.partName + " " + request.make)}`,
-      image: q.image
-    }));
+      price: (typeof q.price === 'number' && q.price > 0) ? q.price : 0,
+      currency: "BRL",
+      description: q.description || "Peça Nova",
+      link: q.link,
+      image: q.image,
+      installments: q.installments
+    })).filter((q: QuoteResult) => {
+        // Remove links quebrados ou genéricos se possível
+        return q.link && q.link.startsWith('http') && !q.link.includes('mercadolivre') && !q.link.includes('shopee');
+    });
+
+    // Ordenação: Menor preço primeiro (ignorando zeros se houver)
+    validQuotes.sort((a: QuoteResult, b: QuoteResult) => {
+        if (a.price > 0 && b.price > 0) return a.price - b.price;
+        if (a.price > 0) return -1;
+        return 1;
+    });
+
+    // Se a IA falhar em trazer preços reais, lançamos erro para acionar fallback manual
+    if (validQuotes.length === 0) {
+        throw new Error("Nenhum preço encontrado nas lojas selecionadas.");
+    }
 
     return {
       quotes: validQuotes,
-      summary: `Encontramos ${validQuotes.length} opções para sua busca.`,
+      summary: `Encontramos ${validQuotes.length} ofertas em lojas especializadas, começando por R$ ${validQuotes[0].price.toFixed(2)}.`,
       groundingSources: result.candidates?.[0]?.groundingMetadata?.groundingChunks || []
     };
 
@@ -137,7 +186,7 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     console.error("Erro na busca IA:", error);
     return {
       quotes: generateFallbackLinks(request),
-      summary: "Não foi possível processar a busca em tempo real. Tente os links diretos abaixo.",
+      summary: "Não foi possível verificar o preço exato em tempo real. Use os links diretos das lojas parceiras abaixo:",
       groundingSources: []
     };
   }
