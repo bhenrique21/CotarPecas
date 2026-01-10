@@ -21,6 +21,10 @@ const ResultsList: React.FC<ResultsListProps> = ({ quotes }) => {
 
   const visibleQuotes = quotes.slice(0, visibleCount);
   const hasMore = visibleCount < quotes.length;
+  
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(price);
+  };
 
   return (
     <div className="mt-8 animate-fade-in-up">
@@ -28,7 +32,7 @@ const ResultsList: React.FC<ResultsListProps> = ({ quotes }) => {
         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        Resultados encontrados (Menor Preço)
+        Resultados da Busca
       </h3>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden divide-y divide-slate-100">
@@ -39,6 +43,8 @@ const ResultsList: React.FC<ResultsListProps> = ({ quotes }) => {
           if (quote.vendorName.includes("Google")) vendorColorClass = "bg-blue-100 text-blue-800";
           if (quote.vendorName.includes("Amazon")) vendorColorClass = "bg-orange-100 text-orange-800";
           if (quote.vendorName.includes("Shopee")) vendorColorClass = "bg-red-100 text-red-800";
+
+          const hasExactPrice = quote.price && quote.price > 0;
 
           return (
             <div key={index} className="p-4 md:p-5 flex flex-col md:flex-row items-center gap-4 hover:bg-slate-50 transition-colors group">
@@ -54,23 +60,41 @@ const ResultsList: React.FC<ResultsListProps> = ({ quotes }) => {
                   <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${vendorColorClass}`}>
                     {quote.vendorName}
                   </span>
-                  {index === 0 && <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-100">Melhor Preço</span>}
+                  {hasExactPrice && index === 0 && <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-100">Melhor Preço</span>}
                 </div>
-                <h4 className="font-bold text-slate-800 text-base md:text-lg leading-tight">
+                <h4 className="font-bold text-slate-800 text-base md:text-lg leading-tight line-clamp-2">
                   {quote.productName}
                 </h4>
-                <p className="text-xs text-slate-500 mt-1">{quote.description}</p>
+                {/* Se tiver preço exato, mostramos ele grande. Se não, mostramos descrição */}
+                {hasExactPrice ? (
+                   <div className="mt-1 md:hidden">
+                      <span className="text-2xl font-bold text-brand-orange">{formatPrice(quote.price)}</span>
+                   </div>
+                ) : (
+                   <p className="text-xs text-slate-500 mt-1 line-clamp-1">{quote.description}</p>
+                )}
               </div>
 
-              {/* Action Button */}
-              <div className="w-full md:w-auto shrink-0">
+              {/* Price & Action Button */}
+              <div className="w-full md:w-auto shrink-0 flex flex-col items-center md:items-end gap-2">
+                {hasExactPrice && (
+                    <div className="hidden md:block text-right">
+                        <span className="block text-[10px] text-slate-400 font-bold uppercase">À vista</span>
+                        <span className="text-2xl font-bold text-brand-orange font-heading">{formatPrice(quote.price)}</span>
+                    </div>
+                )}
+
                 <a 
                   href={quote.link} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="block w-full md:w-auto text-center px-6 py-3 bg-white border-2 border-brand-blue text-brand-blue font-bold rounded-xl hover:bg-brand-blue hover:text-white transition-all active:scale-95 shadow-sm"
+                  className={`block w-full md:w-auto text-center px-6 py-3 rounded-xl font-bold transition-all active:scale-95 shadow-sm whitespace-nowrap ${
+                      hasExactPrice 
+                      ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-200'
+                      : 'bg-white border-2 border-brand-blue text-brand-blue hover:bg-brand-blue hover:text-white'
+                  }`}
                 >
-                  Ver no Site
+                  {hasExactPrice ? 'Comprar Agora' : 'Ver Ofertas'}
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline-block ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                   </svg>
