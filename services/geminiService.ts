@@ -21,8 +21,7 @@ const cleanAndParseJSON = (text: string): any => {
 };
 
 /**
- * GERA LINKS DE FALLBACK (Focado EXCLUSIVAMENTE em Lojas de Autopeças)
- * Usado apenas se a IA falhar totalmente.
+ * GERA LINKS DE FALLBACK (Último recurso)
  */
 const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
   const cleanPart = request.partName.trim();
@@ -32,37 +31,37 @@ const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
   return [
     {
       vendorName: "Loja do Mecânico",
-      productName: `Buscar "${cleanPart}" na Loja do Mecânico`,
+      productName: `Verificar preço na Loja do Mecânico`,
       price: 0, 
       currency: "BRL",
-      description: "Maior loja de máquinas e ferramentas da América Latina.",
+      description: "Clique para ver o preço atual no site",
       link: `https://www.lojadomecanico.com.br/busca?q=${encodedTerm}`,
       image: "https://www.lojadomecanico.com.br/imagens/logo-loja-do-mecanico.png"
     },
     {
       vendorName: "Hipervarejo",
-      productName: `Buscar na Hipervarejo`,
+      productName: `Verificar preço na Hipervarejo`,
       price: 0,
       currency: "BRL",
-      description: "Especialista em peças e pneus.",
+      description: "Clique para ver o preço atual no site",
       link: `https://www.hipervarejo.com.br/busca?q=${encodedTerm}`,
       image: "https://images.tcdn.com.br/img/img_prod/717887/1634925769_logo_hipervarejo.png"
     },
     {
       vendorName: "Jocar",
-      productName: `Buscar na Jocar`,
+      productName: `Verificar preço na Jocar`,
       price: 0,
       currency: "BRL",
-      description: "A loja de autopeças online.",
+      description: "Clique para ver o preço atual no site",
       link: `https://www.jocar.com.br/busca/?q=${encodedTerm}`,
       image: "https://www.jocar.com.br/Imagens/logo-jocar.png"
     },
     {
       vendorName: "Connect Parts",
-      productName: `Buscar na Connect Parts`,
+      productName: `Verificar preço na Connect Parts`,
       price: 0,
       currency: "BRL",
-      description: "Som, vídeo e acessórios automotivos.",
+      description: "Clique para ver o preço atual no site",
       link: `https://www.connectparts.com.br/busca?q=${encodedTerm}`,
       image: "https://www.connectparts.com.br/arquivos/logo-connect-parts.png"
     }
@@ -81,65 +80,50 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     };
   }
 
-  // Prompt desenhado para ignorar marketplaces e focar em dados estruturados de lojas reais
+  // Prompt MATEMÁTICO e INTELIGENTE
   const prompt = `
-  Você é um especialista em compras de autopeças (Auto Parts Sniper).
-  
-  MISSÃO: Encontrar o MENOR PREÇO REAL para a peça solicitada, ignorando marketplaces genéricos.
-  
-  DADOS DA BUSCA:
+  ATUE COMO UM ALGORITMO DE PRECIFICAÇÃO DE AUTOPEÇAS.
+
+  OBJETIVO: Encontrar o PREÇO À VISTA (PIX/Boleto) ou CALCULAR O TOTAL se houver apenas parcelas.
+
+  INPUT:
   - Peça: "${request.partName}"
   - Veículo: "${request.make} ${request.model} ${request.year}"
-  - Localização: Brasil
-  
-  REGRAS DE OURO (Whitelisting):
-  1. BUSQUE APENAS nestes domínios confiáveis e similares (Lojas Oficiais de Autopeças):
-     - lojadomecanico.com.br
-     - hipervarejo.com.br
-     - jocar.com.br
-     - connectparts.com.br
-     - autoglass.com.br
-     - pneustore.com.br
-     - kdpneus.com.br
-     - dellavia.com.br
-     - canaldapeca.com.br
-     - autoz.com.br
-  
-  2. PROIBIDO (Blacklisting):
-     - NÃO retorne resultados do Mercado Livre (mercadolivre.com.br).
-     - NÃO retorne resultados da Shopee.
-     - NÃO retorne resultados da Amazon.
-     - NÃO retorne resultados da OLX ou AliExpress.
-  
-  3. EXTRAÇÃO DE DADOS:
-     - Você DEVE extrair o preço numérico exato (ex: 150.00). Não retorne 0 se encontrar o produto.
-     - O link DEVE ser direto para o produto, não para a home ou busca genérica.
-  
-  SAÍDA ESPERADA (JSON ARRAY):
-  Retorne um JSON puro com 5 a 8 opções encontradas.
+  - Contexto: Brasil, Lojas de Autopeças Especializadas.
+
+  ALGORITMO DE BUSCA E EXTRAÇÃO:
+  1. Use o Google Search para encontrar ofertas em sites como: Loja do Mecânico, Hipervarejo, Jocar, Connect Parts, PneuStore, Autoglass, etc.
+  2. IGNORE: Mercado Livre, Shopee, Amazon, AliExpress (Marketplaces genéricos).
+  3. LÓGICA DE PREÇO (CRÍTICO):
+     - Se encontrar "R$ 100,00 à vista", use 100.00.
+     - Se encontrar "10x de R$ 30,00", CALCULE: 10 * 30 = 300.00.
+     - Se encontrar "R$ 200,00 (sem estoque)", IGNORE.
+     - O preço DEVE ser numérico e maior que zero.
+
+  OUTPUT STRICT JSON:
+  Retorne um array JSON com as 5 melhores ofertas (menor preço primeiro).
   [
     {
-      "vendorName": "Nome da Loja (ex: Hipervarejo)",
-      "productName": "Título completo do produto",
-      "price": 129.90, (Número float, use ponto para decimais)
-      "link": "URL completa do produto",
-      "image": "URL da imagem (se conseguir extrair)",
-      "description": "Detalhes breves (ex: Marca Cofap, Dianteiro)"
+      "vendorName": "Nome da Loja",
+      "productName": "Título exato do anúncio",
+      "price": 150.50, // FLOAT OBRIGATÓRIO. NÃO USE STRINGS.
+      "link": "URL direta do produto",
+      "image": "URL da imagem (tente encontrar uma URL válida de jpg/png)",
+      "description": "Marca X, Modelo Y (Detalhes técnicos breves)"
     }
   ]
   `;
 
   try {
-    // Timeout para garantir UX (25 segundos)
     const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error("A busca demorou muito. Tente novamente.")), 25000)
+      setTimeout(() => reject(new Error("Tempo limite excedido na busca de preços.")), 30000)
     );
 
     const aiPromise = genAI.models.generateContent({
-      model: "gemini-2.0-flash-exp", // Modelo rápido com capacidade de busca atualizada
+      model: "gemini-2.0-flash-exp", 
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }], // Força o uso da busca do Google
+        tools: [{ googleSearch: {} }],
         responseMimeType: "application/json" 
       }
     });
@@ -149,7 +133,7 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     const jsonText = result.text;
     const aiQuotes = cleanAndParseJSON(jsonText);
     
-    // Filtragem e Validação Rigorosa
+    // FILTRAGEM RIGOROSA DE INTEGRIDADE
     const validQuotes = aiQuotes.map((q: any) => ({
       vendorName: q.vendorName || "Loja Especializada",
       productName: q.productName || request.partName,
@@ -160,25 +144,21 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
       image: q.image,
       installments: q.installments
     })).filter((q: QuoteResult) => {
-        // Remove links quebrados ou genéricos se possível
-        return q.link && q.link.startsWith('http') && !q.link.includes('mercadolivre') && !q.link.includes('shopee');
+        // Regra de Ouro: Só passa se tiver preço real E link válido
+        return q.price > 0 && q.link && q.link.startsWith('http') && !q.link.includes('mercadolivre') && !q.link.includes('shopee');
     });
 
-    // Ordenação: Menor preço primeiro (ignorando zeros se houver)
-    validQuotes.sort((a: QuoteResult, b: QuoteResult) => {
-        if (a.price > 0 && b.price > 0) return a.price - b.price;
-        if (a.price > 0) return -1;
-        return 1;
-    });
+    // Ordenação Inteligente: Menor Preço -> Maior Preço
+    validQuotes.sort((a: QuoteResult, b: QuoteResult) => a.price - b.price);
 
-    // Se a IA falhar em trazer preços reais, lançamos erro para acionar fallback manual
+    // Se falhar, lança erro para cair no tratamento visual de erro, em vez de mostrar lista vazia
     if (validQuotes.length === 0) {
-        throw new Error("Nenhum preço encontrado nas lojas selecionadas.");
+        throw new Error("A IA não conseguiu validar os preços finais nos sites parceiros.");
     }
 
     return {
       quotes: validQuotes,
-      summary: `Encontramos ${validQuotes.length} ofertas em lojas especializadas, começando por R$ ${validQuotes[0].price.toFixed(2)}.`,
+      summary: `Análise concluída: ${validQuotes.length} ofertas validadas. Melhor preço: R$ ${validQuotes[0].price.toFixed(2)}.`,
       groundingSources: result.candidates?.[0]?.groundingMetadata?.groundingChunks || []
     };
 
@@ -186,7 +166,7 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
     console.error("Erro na busca IA:", error);
     return {
       quotes: generateFallbackLinks(request),
-      summary: "Não foi possível verificar o preço exato em tempo real. Use os links diretos das lojas parceiras abaixo:",
+      summary: "Não foi possível confirmar o preço exato. Verifique os links abaixo.",
       groundingSources: []
     };
   }
