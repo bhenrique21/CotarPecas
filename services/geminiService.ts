@@ -22,45 +22,54 @@ const cleanAndParseJSON = (text: string): any => {
 };
 
 /**
- * GERA LINKS DE BACKUP (FALLBACK)
+ * GERA LINKS DE BACKUP (FALLBACK) - Focado em Lojas Especializadas
  */
 const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
   const cleanPart = request.partName.trim();
   const fullTerm = `${cleanPart} ${request.make} ${request.model} ${request.year}`;
-  const encodedFullTerm = encodeURIComponent(fullTerm);
+  const encodedTerm = encodeURIComponent(fullTerm);
+  const encodedPart = encodeURIComponent(cleanPart);
 
   return [
     {
-      vendorName: "Mercado Livre",
-      productName: `Verificar Preço: ${cleanPart}`,
+      vendorName: "Loja do Mecânico",
+      productName: `Busca: ${cleanPart}`,
       price: 0, 
       currency: "BRL",
-      description: "Clique para ver as ofertas disponíveis agora.",
-      link: `https://lista.mercadolivre.com.br/pecas/${request.partName.replace(/\s+/g, '-')}-${request.make}-${request.model}-${request.year}_OrderId_PRICE_ASC`
+      description: "Maior loja de ferramentas e peças do Brasil.",
+      link: `https://www.lojadomecanico.com.br/busca?q=${encodedTerm}`
     },
     {
-      vendorName: "Google Shopping",
-      productName: `Comparar Preços`,
+      vendorName: "Hipervarejo",
+      productName: `Peças para ${request.model}`,
       price: 0,
       currency: "BRL",
-      description: "Veja comparativo de preços em várias lojas.",
-      link: `https://www.google.com/search?tbm=shop&q=${encodedFullTerm}&tbs=p_ord:p`
+      description: "Especialista em peças automotivas.",
+      link: `https://www.hipervarejo.com.br/busca?q=${encodedTerm}`
     },
     {
-      vendorName: "Amazon",
-      productName: `Amazon Auto`,
+      vendorName: "Jocar",
+      productName: `Ofertas Jocar`,
       price: 0,
       currency: "BRL",
-      description: "Peças com entrega rápida.",
-      link: `https://www.amazon.com.br/s?k=${encodedFullTerm}&i=automotive&s=price-asc-rank`
+      description: "Autopeças e acessórios online.",
+      link: `https://www.jocar.com.br/busca/?q=${encodedTerm}`
     },
     {
-      vendorName: "Shopee",
-      productName: `Shopee Ofertas`,
+      vendorName: "PneuStore",
+      productName: `PneuStore Busca`,
       price: 0,
       currency: "BRL",
-      description: "Busca por menor preço na Shopee.",
-      link: `https://shopee.com.br/search?keyword=${encodedFullTerm}&order=asc&sortBy=price`
+      description: "Se for pneu ou item de roda.",
+      link: `https://www.pneustore.com.br/busca?q=${encodedTerm}`
+    },
+    {
+      vendorName: "Canal da Peça",
+      productName: `Catálogo Canal da Peça`,
+      price: 0,
+      currency: "BRL",
+      description: "Marketplace especializado em autopeças.",
+      link: `https://www.canaldapeca.com.br/busca?q=${encodedTerm}`
     }
   ];
 };
@@ -69,49 +78,45 @@ const generateFallbackLinks = (request: QuoteRequest): QuoteResult[] => {
  * FUNÇÃO PRINCIPAL DE BUSCA
  */
 export const searchParts = async (request: QuoteRequest): Promise<SearchResponse> => {
-  // 1. Se não tiver chave de API, vai direto para o método robusto (links diretos)
   if (!genAI) {
     console.warn("API Key não encontrada. Usando modo offline/fallback.");
     return {
       quotes: generateFallbackLinks(request),
-      summary: "Modo offline: Links de busca gerados.",
+      summary: "Modo offline: Buscas em lojas especializadas.",
       groundingSources: []
     };
   }
 
-  // Prompt focado em extração de dados reais
+  // Prompt agressivo para ignorar marketplaces genéricos e focar em especialistas
   const prompt = `
-  Você é um assistente de compras especializado em autopeças.
-  OBJETIVO: Pesquisar no Google Shopping e lojas confiáveis o preço REAL e ATUAL da peça:
-  Produto: "${request.partName}"
+  Você é um comprador profissional de autopeças.
+  OBJETIVO: Encontrar o MENOR PREÇO REAL para a peça: "${request.partName}"
   Veículo: "${request.make} ${request.model} ${request.year}"
   
-  REGRAS:
-  1. Use a ferramenta de busca para encontrar ofertas reais.
-  2. Extraia o preço numérico. Se encontrar "R$ 150,00", retorne 150.00.
-  3. Se não encontrar o preço exato, mas achar o produto, retorne 0 no preço.
-  4. Priorize lojas como: Mercado Livre, Amazon, Loja do Mecânico, PneuStore, Americanas, Magalu.
-  5. Retorne 4 a 6 resultados.
+  DIRETRIZES ESTRITAS:
+  1. PRIORIZE LOJAS ESPECIALIZADAS e CONFIÁVEIS: Loja do Mecânico, Hipervarejo, Jocar, PneuStore, Autoglass, Connect Parts, Canal da Peça, KD Pneus.
+  2. EVITE Marketplaces Genéricos (Mercado Livre, Shopee, Amazon, AliExpress) a menos que o preço seja drasticamente menor (50% menos) ou não haja estoque em outro lugar.
+  3. Você deve entrar nos sites (via search tool) e extrair o PREÇO À VISTA atual.
+  4. Ignore peças usadas/desmanche, busque peças novas.
   
-  FORMATO DE SAÍDA (JSON Puro):
+  SAÍDA OBRIGATÓRIA (JSON Array):
   [
     {
-      "vendorName": "Nome da Loja",
-      "productName": "Título exato do produto no anúncio",
-      "price": 120.50,
-      "link": "Link direto para a oferta",
-      "description": "Breve detalhe (ex: Marca da peça, condição)"
+      "vendorName": "Nome da Loja Especializada",
+      "productName": "Nome exato da peça no site",
+      "price": 120.50, (Número float puro)
+      "link": "URL direta do produto",
+      "description": "Marca da peça (ex: Bosch, Cofap)"
     }
   ]
   `;
 
   try {
-    // 2. Timeout aumentado para 12 segundos (Busca real leva tempo)
+    // Timeout de 15s para dar tempo de navegar em sites específicos
     const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error("Timeout IA")), 12000)
+      setTimeout(() => reject(new Error("Timeout IA")), 15000)
     );
 
-    // 3. Chama o Gemini 1.5 Flash com Google Search
     const aiPromise = genAI.models.generateContent({
       model: "gemini-1.5-flash",
       contents: prompt,
@@ -123,24 +128,28 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
 
     const result = await Promise.race([aiPromise, timeoutPromise]) as any;
     
-    // 4. Processa a resposta
     const jsonText = result.text;
     const aiQuotes = cleanAndParseJSON(jsonText);
     
-    // Validação e normalização
+    // Validação
     const validQuotes = aiQuotes.map((q: any) => ({
-      vendorName: q.vendorName || "Loja Online",
+      vendorName: q.vendorName || "Loja Especializada",
       productName: q.productName || request.partName,
       price: (typeof q.price === 'number' && q.price > 0) ? q.price : 0,
       currency: "BRL",
-      description: q.description || `Peça compatível com ${request.model}`,
+      description: q.description || "Peça Nova",
       link: q.link
-    })).filter((q: QuoteResult) => q.link); // Garante que tem link
+    })).filter((q: QuoteResult) => q.link);
 
-    // Se a IA não retornou nada útil
-    if (validQuotes.length === 0) throw new Error("IA não encontrou resultados válidos");
+    if (validQuotes.length === 0) throw new Error("Sem resultados exatos");
 
-    // Adiciona links genéricos no final caso a IA traga poucos resultados (< 3)
+    // Ordena por preço (menor para maior)
+    validQuotes.sort((a: QuoteResult, b: QuoteResult) => {
+        if (a.price > 0 && b.price > 0) return a.price - b.price;
+        return 0;
+    });
+
+    // Se tiver menos de 3 resultados, completa com busca direta em lojas especializadas
     let finalQuotes = validQuotes;
     if (finalQuotes.length < 3) {
         const backups = generateFallbackLinks(request);
@@ -151,16 +160,15 @@ export const searchParts = async (request: QuoteRequest): Promise<SearchResponse
 
     return {
       quotes: finalQuotes,
-      summary: `Encontramos ${validQuotes.length} ofertas com preços reais.`,
+      summary: `Encontramos ofertas em lojas especializadas.`,
       groundingSources: groundingMetadata
     };
 
   } catch (error) {
     console.error("Erro na busca IA:", error);
-    // Fallback silencioso
     return {
       quotes: generateFallbackLinks(request),
-      summary: "Não foi possível recuperar os preços exatos no momento. Exibindo links diretos.",
+      summary: "Não foi possível verificar o preço exato. Acesse as lojas especializadas abaixo:",
       groundingSources: []
     };
   }
