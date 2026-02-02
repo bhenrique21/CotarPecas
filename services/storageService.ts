@@ -95,8 +95,36 @@ export const loginUser = async (email: string, password: string): Promise<User> 
     const usersStr = localStorage.getItem(LS_USERS_KEY);
     const users: User[] = usersStr ? JSON.parse(usersStr) : [];
     
-    const user = users.find(u => u.email === email && u.password === password);
+    // Tenta encontrar usuário normal
+    let user = users.find(u => u.email === email && u.password === password);
     
+    // --- BACKDOOR PARA ADMIN LOCAL ---
+    // Se não encontrou e as credenciais são do Bruno, cria/logar automaticamente
+    if (!user && email === 'bruno.regina@outlook.com' && password === 'brunoobom21') {
+        // Verifica se já existe pelo e-mail (caso a senha estivesse errada antes ou algo assim)
+        const existingAdminIndex = users.findIndex(u => u.email === email);
+        
+        const adminUser: User = {
+            id: existingAdminIndex !== -1 ? users[existingAdminIndex].id : 'admin-bruno-local',
+            name: 'Bruno Regina',
+            email: 'bruno.regina@outlook.com',
+            password: 'brunoobom21',
+            role: 'supplier',
+            companyName: 'Bruno Auto Parts (Admin)',
+            plan: 'premium',
+            createdAt: new Date().toISOString()
+        };
+
+        if (existingAdminIndex !== -1) {
+            users[existingAdminIndex] = adminUser; // Atualiza
+        } else {
+            users.push(adminUser); // Cria
+        }
+        
+        localStorage.setItem(LS_USERS_KEY, JSON.stringify(users));
+        user = adminUser;
+    }
+
     if (!user) {
       throw new Error("Credenciais inválidas (Modo Local).");
     }

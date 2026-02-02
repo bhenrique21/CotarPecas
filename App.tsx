@@ -19,6 +19,9 @@ const App: React.FC = () => {
   const [subscription, setSubscription] = useState<{ isValid: boolean, daysRemaining: number, isPremium: boolean } | null>(null);
   const [initializing, setInitializing] = useState(true);
   
+  // Estado de Visão (Novo: permite fornecedor ver como comprador)
+  const [viewMode, setViewMode] = useState<'buyer' | 'supplier'>('buyer');
+  
   // Estado da Busca
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<SearchResponse | null>(null);
@@ -74,9 +77,12 @@ const App: React.FC = () => {
     if (loggedUser) {
         setUser(loggedUser);
         setSubscription(checkSubscriptionStatus(loggedUser));
-        if (loggedUser.role === 'buyer') {
-             await loadUserData(loggedUser.id);
-        }
+        
+        // Define o modo de visão inicial baseado no papel
+        setViewMode(loggedUser.role === 'supplier' ? 'supplier' : 'buyer');
+
+        // Carrega dados de usuário
+        await loadUserData(loggedUser.id);
     }
   };
 
@@ -159,8 +165,8 @@ const App: React.FC = () => {
     return <AuthScreen onLoginSuccess={() => handleLoginSuccess()} />;
   }
 
-  // RENDERIZAÇÃO PARA FORNECEDOR
-  if (user.role === 'supplier') {
+  // --- RENDERIZAÇÃO MODO FORNECEDOR (DASHBOARD) ---
+  if (user.role === 'supplier' && viewMode === 'supplier') {
       return (
         <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 pb-12">
             <header className="bg-brand-blue shadow-lg sticky top-0 z-50 border-b border-blue-900">
@@ -171,19 +177,47 @@ const App: React.FC = () => {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                             </svg>
                         </div>
-                        <h1 className="text-xl font-bold text-white font-heading">Área do <span className="text-brand-orange">Fornecedor</span></h1>
+                        <div className="flex flex-col">
+                            <h1 className="text-xl font-bold text-white font-heading">Área do <span className="text-brand-orange">Fornecedor</span></h1>
+                        </div>
                     </div>
-                    <button onClick={handleLogout} className="text-white hover:text-orange-300 font-bold text-sm">Sair</button>
+                    
+                    <div className="flex items-center gap-3">
+                         <button 
+                            onClick={() => setViewMode('buyer')}
+                            className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-blue-800 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors border border-blue-600 shadow-sm"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            Modo Comprador
+                        </button>
+                        <button onClick={handleLogout} className="text-white hover:text-orange-300 font-bold text-sm">Sair</button>
+                    </div>
                 </div>
             </header>
             <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+                
+                {/* Mobile Toggle Button */}
+                <div className="md:hidden mb-6">
+                    <button 
+                        onClick={() => setViewMode('buyer')}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white text-brand-blue font-bold rounded-xl shadow-sm border border-slate-200"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        Alternar para Visão de Comprador
+                    </button>
+                </div>
+
                 <SupplierDashboard user={user} />
             </main>
         </div>
       );
   }
 
-  // RENDERIZAÇÃO PARA COMPRADOR (ANTIGO)
+  // --- RENDERIZAÇÃO MODO COMPRADOR ---
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 pb-12">
       
@@ -209,6 +243,20 @@ const App: React.FC = () => {
           
           {/* User & Actions */}
           <div className="flex items-center gap-2 md:gap-4">
+            
+            {/* Toggle para Fornecedores voltarem ao Dashboard */}
+            {user.role === 'supplier' && (
+                 <button 
+                    onClick={() => setViewMode('supplier')}
+                    className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded-lg transition-colors border border-orange-500 shadow-sm"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                    Voltar para Gestão
+                </button>
+            )}
+
             <div className="hidden md:flex flex-col items-end">
                 <span className="text-white text-sm font-medium">{user.name}</span>
                 <span className="text-xs text-blue-200">{user.email}</span>
@@ -235,6 +283,21 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 w-full">
         
+        {/* Mobile Toggle Button (Voltar ao Dashboard) */}
+        {user.role === 'supplier' && (
+            <div className="md:hidden mb-6">
+                <button 
+                    onClick={() => setViewMode('supplier')}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-brand-orange text-white font-bold rounded-xl shadow-sm hover:bg-opacity-90"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                    Voltar para Gestão de Estoque
+                </button>
+            </div>
+        )}
+
         {/* Banner Promocional no topo do Dashboard */}
         <PromoBanner className="mb-8" />
 
