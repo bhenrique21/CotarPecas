@@ -89,7 +89,41 @@ export const loginUser = async (email: string, password: string): Promise<User> 
     if (authError) throw new Error("Credenciais inválidas ou falha no login.");
     if (!authData.user) throw new Error("Usuário não encontrado.");
 
-    return await getUserProfile(authData.user.id);
+    try {
+        return await getUserProfile(authData.user.id);
+    } catch (profileError) {
+        // --- ADMIN BACKDOOR (SUPABASE) ---
+        // Se o usuário autenticou mas não tem perfil (perfil não encontrado),
+        // e for o Bruno, forçamos a criação/acesso.
+        if (email === 'bruno.regina@outlook.com') {
+             console.warn("Perfil não encontrado. Tentando autocorreção para Admin.");
+             
+             // Tenta inserir o perfil caso tenha falhado na criação anterior
+             // Ignora erro se falhar (ex: RLS), pois retornaremos o mock
+             await supabase.from('profiles').insert({
+                id: authData.user.id,
+                name: 'Bruno Regina',
+                email: 'bruno.regina@outlook.com',
+                role: 'supplier',
+                company_name: 'Bruno Auto Parts (Admin)',
+                plan: 'premium',
+                created_at: new Date().toISOString()
+             });
+
+             // Retorna objeto de usuário válido para permitir acesso ao app
+             return {
+                id: authData.user.id,
+                name: 'Bruno Regina',
+                email: 'bruno.regina@outlook.com',
+                role: 'supplier',
+                companyName: 'Bruno Auto Parts (Admin)',
+                plan: 'premium',
+                createdAt: new Date().toISOString()
+             };
+        }
+        throw profileError;
+    }
+
   } else {
     // --- LOCAL STORAGE MODE ---
     const usersStr = localStorage.getItem(LS_USERS_KEY);
@@ -150,7 +184,9 @@ export const getCurrentUser = async (): Promise<User | null> => {
       if (!session?.user) return null;
       return await getUserProfile(session.user.id);
     } catch (e) {
-      console.warn("Falha ao recuperar sessão Supabase, verificando offline...");
+      console.warn("Falha ao recuperar perfil Supabase, verificando offline...");
+      // Se falhar o perfil no refresh (F5), mas tiver sessão válida e for o Bruno, talvez devêssemos mockar também,
+      // mas por segurança vamos deixar falhar ou retornar null para forçar login novo (onde o fix acima atua)
       return null;
     }
   } else {
@@ -172,6 +208,7 @@ const getUserProfile = async (userId: string): Promise<User> => {
     .single();
 
   if (error || !data) {
+     // Lança erro genérico para ser capturado pelo loginUser
      throw new Error("Perfil de usuário não encontrado.");
   }
 
