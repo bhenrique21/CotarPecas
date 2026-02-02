@@ -1,14 +1,16 @@
-import { User, QuoteHistoryItem, QuoteRequest } from '../types';
+
+import { User, QuoteHistoryItem, QuoteRequest, Product, VehicleType } from '../types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 // === LOCAL STORAGE KEYS (FALLBACK) ===
 const LS_USERS_KEY = 'cotarpecas_users';
+const LS_PRODUCTS_KEY = 'cotarpecas_products'; // Novo
 const LS_HISTORY_KEY = 'cotarpecas_history';
 const LS_SESSION_KEY = 'cotarpecas_session';
 
 // --- AUTH & PROFILES ---
 
-export const registerUser = async (name: string, email: string, password: string): Promise<User> => {
+export const registerUser = async (name: string, email: string, password: string, role: 'buyer' | 'supplier', companyName?: string): Promise<User> => {
   if (isSupabaseConfigured) {
     // --- SUPABASE MODE ---
     const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -23,6 +25,8 @@ export const registerUser = async (name: string, email: string, password: string
       id: authData.user.id,
       name,
       email,
+      role,
+      company_name: companyName,
       plan: 'free_trial',
       created_at: new Date().toISOString()
     };
@@ -40,6 +44,8 @@ export const registerUser = async (name: string, email: string, password: string
       id: newUserProfile.id,
       name: newUserProfile.name,
       email: newUserProfile.email,
+      role: newUserProfile.role as 'buyer' | 'supplier',
+      companyName: newUserProfile.company_name,
       plan: newUserProfile.plan as 'free_trial' | 'premium',
       createdAt: newUserProfile.created_at,
       password: ''
@@ -57,14 +63,16 @@ export const registerUser = async (name: string, email: string, password: string
       id: crypto.randomUUID(),
       name,
       email,
-      password, // Nota: Em localStorage salvamos a senha para simular login, em prod isso é inseguro
+      password, 
+      role,
+      companyName,
       plan: 'free_trial',
       createdAt: new Date().toISOString()
     };
 
     users.push(newUser);
     localStorage.setItem(LS_USERS_KEY, JSON.stringify(users));
-    localStorage.setItem(LS_SESSION_KEY, newUser.id); // Auto login
+    localStorage.setItem(LS_SESSION_KEY, newUser.id);
 
     return newUser;
   }
@@ -143,9 +151,118 @@ const getUserProfile = async (userId: string): Promise<User> => {
     id: data.id,
     name: data.name,
     email: data.email,
+    role: data.role || 'buyer',
+    companyName: data.company_name,
     plan: data.plan,
     createdAt: data.created_at
   };
+}
+
+// --- PRODUCT MANAGEMENT (FORNECEDORES) ---
+
+export const saveProduct = async (product: Omit<Product, 'id' | 'createdAt'>): Promise<Product> => {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('products')
+      .insert([product])
+      .select()
+      .single();
+      
+    if (error) throw new Error("Erro ao salvar produto.");
+    return data;
+  } else {
+    const productsStr = localStorage.getItem(LS_PRODUCTS_KEY);
+    const products: Product[] = productsStr ? JSON.parse(productsStr) : [];
+    
+    const newProduct: Product = {
+      ...product,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString()
+    };
+    
+    products.push(newProduct);
+    localStorage.setItem(LS_PRODUCTS_KEY, JSON.stringify(products));
+    return newProduct;
+  }
+};
+
+export const getSupplierProducts = async (supplierId: string): Promise<Product[]> => {
+  if (isSupabaseConfigured) {
+    const { data } = await supabase
+      .from('products')
+      .select('*')
+      .eq('supplierId', supplierId);
+    return data || [];
+  } else {
+    const productsStr = localStorage.getItem(LS_PRODUCTS_KEY);
+    const products: Product[] = productsStr ? JSON.parse(productsStr) : [];
+    return products.filter(p => p.supplierId === supplierId);
+  }
+};
+
+// --- SIMULAÇÃO DE UPLOAD DE PLANILHA (CSV) ---
+export const processSpreadsheetUpload = async (fileContent: string, supplier: User): Promise<number> => {
+  // Espera formato CSV simples: PartName,Make,Model,Brand,Price,Stock
+  const lines = fileContent.split('\n');
+  let count = 0;
+  
+  // Ignora cabeçalho
+  const startIndex = 1;
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    
+    const parts = line.split(',');
+    if (parts.length >= 5) {
+      await saveProduct({
+        supplierId: supplier.id,
+        supplierName: supplier.companyName || supplier.name,
+        vehicleType: VehicleType.CARRO, // Default
+        partName: parts[0].trim(),
+        make: parts[1].trim(),
+        model: parts[2].trim(),
+        brand: parts[3].trim(),
+        price: parseFloat(parts[4]) || 0,
+        stock: parseInt(parts[5]) || 1
+      });
+      count++;
+    }
+  }
+  return count;
+};
+
+// --- SEARCH ENGINE (BUSCA INTERNA) ---
+
+export const searchInternalProducts = async (term: string, model: string): Promise<Product[]> => {
+  // Normalização básica
+  const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const termNorm = normalize(term);
+  const modelNorm = normalize(model);
+
+  if (isSupabaseConfigured) {
+    const { data } = await supabase
+      .from('products')
+      .select('*'); // Em prod, usaria full text search
+      
+    if (!data) return [];
+    
+    return data.filter((p: any) => {
+        const matchName = normalize(p.partName).includes(termNorm);
+        const matchModel = normalize(p.model).includes(modelNorm) || normalize(p.make).includes(modelNorm);
+        return matchName && matchModel;
+    });
+  } else {
+    const productsStr = localStorage.getItem(LS_PRODUCTS_KEY);
+    const products: Product[] = productsStr ? JSON.parse(productsStr) : [];
+    
+    return products.filter(p => {
+       const matchName = normalize(p.partName).includes(termNorm);
+       // Busca frouxa: se o modelo estiver incluso ou for genérico
+       const matchModel = modelNorm ? (normalize(p.model).includes(modelNorm) || normalize(p.make).includes(modelNorm)) : true;
+       return matchName && matchModel;
+    });
+  }
 }
 
 // --- SUBSCRIPTION ---

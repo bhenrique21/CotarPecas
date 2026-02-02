@@ -10,7 +10,10 @@ interface AuthScreenProps {
 
 const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   const [viewState, setViewState] = useState<'login' | 'register' | 'plans'>('login');
+  const [role, setRole] = useState<'buyer' | 'supplier'>('buyer');
+  
   const [name, setName] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -30,7 +33,8 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         await loginUser(cleanEmail, cleanPassword);
       } else {
         if (!name) throw new Error("Nome é obrigatório");
-        await registerUser(name, cleanEmail, cleanPassword);
+        if (role === 'supplier' && !companyName) throw new Error("Nome da empresa é obrigatório");
+        await registerUser(name, cleanEmail, cleanPassword, role, companyName);
       }
       onLoginSuccess();
     } catch (err: any) {
@@ -73,7 +77,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           ) : (
             <>
                 <h3 className="text-xl md:text-2xl font-bold text-slate-800 mb-6 text-center font-heading">
-                    {viewState === 'login' ? 'Acesse sua conta' : 'Crie sua conta com 7 dias grátis'}
+                    {viewState === 'login' ? 'Acesse sua conta' : 'Crie sua conta'}
                 </h3>
 
                 {error && (
@@ -84,19 +88,56 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-5">
+                    
+                    {/* Role Selector (Only for Register) */}
                     {viewState === 'register' && (
-                    <div>
-                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5 ml-1">Nome Completo</label>
-                        <input
-                        type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className="w-full p-3.5 bg-slate-50 border border-slate-300 text-slate-800 font-medium rounded-xl focus:ring-brand-orange focus:border-brand-orange placeholder-slate-400 transition-shadow"
-                        placeholder="Seu nome"
-                        required
-                        disabled={isLoading}
-                        />
-                    </div>
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                            <button
+                                type="button"
+                                onClick={() => setRole('buyer')}
+                                className={`p-3 rounded-xl border-2 font-bold text-sm transition-all ${role === 'buyer' ? 'border-brand-blue bg-blue-50 text-brand-blue' : 'border-slate-100 text-slate-500'}`}
+                            >
+                                Sou Comprador
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setRole('supplier')}
+                                className={`p-3 rounded-xl border-2 font-bold text-sm transition-all ${role === 'supplier' ? 'border-brand-orange bg-orange-50 text-brand-orange' : 'border-slate-100 text-slate-500'}`}
+                            >
+                                Sou Fornecedor
+                            </button>
+                        </div>
+                    )}
+
+                    {viewState === 'register' && (
+                    <>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5 ml-1">Nome Completo</label>
+                            <input
+                            type="text"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="w-full p-3.5 bg-slate-50 border border-slate-300 text-slate-800 font-medium rounded-xl focus:ring-brand-orange focus:border-brand-orange placeholder-slate-400 transition-shadow"
+                            placeholder="Seu nome"
+                            required
+                            disabled={isLoading}
+                            />
+                        </div>
+                        {role === 'supplier' && (
+                            <div>
+                                <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5 ml-1">Nome da Empresa</label>
+                                <input
+                                type="text"
+                                value={companyName}
+                                onChange={(e) => setCompanyName(e.target.value)}
+                                className="w-full p-3.5 bg-slate-50 border border-slate-300 text-slate-800 font-medium rounded-xl focus:ring-brand-orange focus:border-brand-orange placeholder-slate-400 transition-shadow"
+                                placeholder="Nome da sua loja/oficina"
+                                required
+                                disabled={isLoading}
+                                />
+                            </div>
+                        )}
+                    </>
                     )}
                     
                     <div>
@@ -156,7 +197,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                     ) : (
-                        viewState === 'login' ? 'Entrar' : 'Começar Teste Grátis'
+                        viewState === 'login' ? 'Entrar' : 'Cadastrar Conta'
                     )}
                     </button>
                 </form>

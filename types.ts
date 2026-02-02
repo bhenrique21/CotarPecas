@@ -16,13 +16,30 @@ export interface QuoteRequest {
   city?: string;
 }
 
+export interface Product {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  vehicleType: VehicleType;
+  make: string;      // Marca do veículo (ex: Fiat)
+  model: string;     // Modelo do veículo (ex: Palio)
+  partName: string;  // Nome da peça
+  brand: string;     // Marca da peça (ex: Bosch)
+  stock: number;
+  price: number;
+  description?: string;
+  createdAt: string;
+}
+
+// Reutilizamos QuoteResult para exibir na lista de busca
 export interface QuoteResult {
   vendorName: string;
   price: number;
   currency: string;
   productName: string;
   description?: string;
-  link?: string;
+  link?: string; // Link simulado de compra
+  stock?: number; // Novo campo
 }
 
 export interface GroundingChunk {
@@ -38,13 +55,14 @@ export interface SearchResponse {
   summary: string;
 }
 
-// Novos tipos para a Plataforma
 export interface User {
   id: string;
   name: string;
   email: string;
-  password?: string; // Em produção, nunca salvar senha em texto puro
-  createdAt: string; // Data de registro para calcular o trial
+  password?: string;
+  role: 'buyer' | 'supplier'; // Novo campo
+  companyName?: string; // Para fornecedores
+  createdAt: string;
   plan: 'free_trial' | 'premium';
 }
 
@@ -55,5 +73,5 @@ export interface QuoteHistoryItem {
   status: 'concluido' | 'pendente' | 'erro';
   request: QuoteRequest;
   resultCount: number;
-  totalValue?: number; // Menor valor encontrado para estatística
+  totalValue?: number;
 }

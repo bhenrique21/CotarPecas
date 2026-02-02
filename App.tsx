@@ -7,6 +7,7 @@ import DashboardStats from './components/DashboardStats';
 import QuoteHistory from './components/QuoteHistory';
 import PromoBanner from './components/PromoBanner';
 import SubscriptionPlans from './components/SubscriptionPlans';
+import SupplierDashboard from './components/SupplierDashboard'; // Novo
 import { QuoteRequest, SearchResponse, User, QuoteHistoryItem } from './types';
 import { searchParts } from './services/geminiService';
 import { getCurrentUser, logoutUser, checkSubscriptionStatus, saveQuoteToHistory, getDashboardStats, getUserHistory, upgradeToPremium } from './services/storageService';
@@ -73,7 +74,9 @@ const App: React.FC = () => {
     if (loggedUser) {
         setUser(loggedUser);
         setSubscription(checkSubscriptionStatus(loggedUser));
-        await loadUserData(loggedUser.id);
+        if (loggedUser.role === 'buyer') {
+             await loadUserData(loggedUser.id);
+        }
     }
   };
 
@@ -110,7 +113,7 @@ const App: React.FC = () => {
       const result = await searchParts(request);
       setData(result);
       
-      // Salvar no Histórico (Supabase ou Local)
+      // Salvar no Histórico
       const lowestPrice = result.quotes.length > 0 ? Math.min(...result.quotes.map(q => q.price)) : 0;
       await saveQuoteToHistory(user.id, request, result.quotes.length, lowestPrice);
       
@@ -119,10 +122,7 @@ const App: React.FC = () => {
 
     } catch (err: any) {
       console.error(err);
-      // Exibe a mensagem de erro exata retornada pelo serviço
       setError(err.message || "Ocorreu um erro desconhecido ao buscar as cotações.");
-      
-      // Reverte stats em caso de erro
       await loadUserData(user.id);
     } finally {
       setLoading(false);
@@ -159,6 +159,31 @@ const App: React.FC = () => {
     return <AuthScreen onLoginSuccess={() => handleLoginSuccess()} />;
   }
 
+  // RENDERIZAÇÃO PARA FORNECEDOR
+  if (user.role === 'supplier') {
+      return (
+        <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 pb-12">
+            <header className="bg-brand-blue shadow-lg sticky top-0 z-50 border-b border-blue-900">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 md:h-20 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 bg-brand-orange rounded-lg flex items-center justify-center text-white">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                            </svg>
+                        </div>
+                        <h1 className="text-xl font-bold text-white font-heading">Área do <span className="text-brand-orange">Fornecedor</span></h1>
+                    </div>
+                    <button onClick={handleLogout} className="text-white hover:text-orange-300 font-bold text-sm">Sair</button>
+                </div>
+            </header>
+            <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+                <SupplierDashboard user={user} />
+            </main>
+        </div>
+      );
+  }
+
+  // RENDERIZAÇÃO PARA COMPRADOR (ANTIGO)
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 pb-12">
       
@@ -178,7 +203,7 @@ const App: React.FC = () => {
                 <h1 className="text-xl md:text-2xl font-bold text-white leading-none font-heading tracking-tight">
                   Cotar<span className="text-brand-orange">Peças</span>
                 </h1>
-                <p className="hidden md:block text-[10px] text-blue-200 uppercase tracking-widest mt-0.5">Painel de Controle</p>
+                <p className="hidden md:block text-[10px] text-blue-200 uppercase tracking-widest mt-0.5">Painel do Comprador</p>
              </div>
           </div>
           
@@ -188,7 +213,6 @@ const App: React.FC = () => {
                 <span className="text-white text-sm font-medium">{user.name}</span>
                 <span className="text-xs text-blue-200">{user.email}</span>
             </div>
-            {/* Mobile User Icon */}
              <div className="md:hidden w-8 h-8 rounded-full bg-blue-800 flex items-center justify-center text-blue-200 border border-blue-700">
                 <span className="text-xs font-bold">{user.name.charAt(0)}</span>
              </div>
@@ -214,33 +238,6 @@ const App: React.FC = () => {
         {/* Banner Promocional no topo do Dashboard */}
         <PromoBanner className="mb-8" />
 
-        {/* Subscription Banner (Visível apenas se estiver em trial) */}
-        {subscription && !subscription.isPremium && subscription.isValid && (
-            <div className={`mb-6 md:mb-8 p-4 md:p-5 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm border bg-blue-50 border-blue-100`}>
-                <div className="flex items-start md:items-center gap-3">
-                    <div className="p-2 rounded-full shrink-0 bg-blue-100 text-brand-blue">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                    </div>
-                    <div>
-                        <h4 className="font-bold text-sm md:text-base text-brand-blue">
-                            Período de Teste Ativo
-                        </h4>
-                        <p className="text-xs md:text-sm leading-tight mt-1 text-blue-700">
-                             Você tem <strong>{subscription.daysRemaining} dias restantes</strong> de uso gratuito.
-                        </p>
-                    </div>
-                </div>
-                <button 
-                    onClick={() => setActiveTab('planos')}
-                    className="w-full md:w-auto px-6 py-2.5 bg-brand-blue text-white text-sm font-bold rounded-lg hover:bg-blue-900 transition-all shadow-md active:scale-95"
-                >
-                    Ver Planos
-                </button>
-            </div>
-        )}
-
         {/* Dashboard Stats */}
         <DashboardStats stats={stats} />
 
@@ -250,13 +247,13 @@ const App: React.FC = () => {
                 onClick={() => { setActiveTab('nova-cotacao'); setData(null); }}
                 className={`flex-1 md:flex-none px-4 md:px-6 py-3 font-medium text-sm whitespace-nowrap border-b-2 transition-colors ${activeTab === 'nova-cotacao' ? 'border-brand-orange text-brand-orange bg-orange-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
-                Nova Cotação
+                Buscar Peça
             </button>
             <button 
                 onClick={() => setActiveTab('historico')}
                 className={`flex-1 md:flex-none px-4 md:px-6 py-3 font-medium text-sm whitespace-nowrap border-b-2 transition-colors ${activeTab === 'historico' ? 'border-brand-orange text-brand-orange bg-orange-50/50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
-                Histórico de Cotações
+                Histórico
             </button>
             <button 
                 onClick={() => setActiveTab('planos')}
@@ -311,10 +308,6 @@ const App: React.FC = () => {
         
         {activeTab === 'planos' && (
             <div className="animate-fade-in">
-                 <div className="text-center mb-6">
-                    <h2 className="text-2xl md:text-3xl font-bold text-slate-800 font-heading">Escolha o seu plano</h2>
-                    <p className="text-slate-600 mt-2">Aproveite ao máximo a inteligência artificial para cotar peças.</p>
-                 </div>
                  <SubscriptionPlans onSubscribe={handleUpgrade} />
             </div>
         )}
